@@ -1,0 +1,13 @@
+DELETE FROM violation;
+DELETE FROM reservation;
+ALTER TABLE reservation AUTO_INCREMENT = 1;
+CALL generate_sample_reservations(CURDATE());
+DELETE FROM waitlist;
+ALTER TABLE waitlist AUTO_INCREMENT = 1;
+CALL generate_sample_waitlist(CURDATE());
+DELETE FROM foodorder;
+ALTER TABLE foodorder AUTO_INCREMENT = 1;
+DELETE FROM orderdetail;
+ALTER TABLE orderdetail AUTO_INCREMENT = 1;
+#运行的时候根据当前日期修改，后一个日期为当前日期，前一个日期为当前日期往前推30天
+CALL generate_foodorders_from_reservations(150, '2026-03-29', '2026-04-27');
