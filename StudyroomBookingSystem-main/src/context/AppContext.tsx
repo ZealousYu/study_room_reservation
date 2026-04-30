@@ -95,6 +95,14 @@ export type WaitlistEntry = {
   createdAt: string;
 };
 
+export type Announcement = {
+  id: string;
+  title: string;
+  content: string;
+  publishedAt: string;
+  updatedAt: string;
+};
+
 type User = {
   phone: string;
   name: string;
@@ -174,6 +182,7 @@ type AppContextValue = {
   cart: CartLine[];
   reservations: Reservation[];
   foodOrders: FoodOrder[];
+  announcements: Announcement[];
   breachRecords: BreachRecord[];
   breachCount: number;
   login: (phone: string, password: string) => { ok: boolean; message: string };
@@ -226,6 +235,13 @@ type AppContextValue = {
   adminMarkReservation: (id: string, mark: '到场' | '违约') => void;
   /** 管理端：违约记录 */
   adminClearBreachLimit: (phone: string) => void;
+  /** 管理端：公告管理 */
+  adminCreateAnnouncement: (input: { title: string; content: string }) => void;
+  adminUpdateAnnouncement: (
+    id: string,
+    input: { title: string; content: string }
+  ) => void;
+  adminDeleteAnnouncement: (id: string) => void;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -263,6 +279,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [foodOrders, setFoodOrders] = useState<FoodOrder[]>([]);
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([
+    {
+      id: 'an1',
+      title: '五一假期营业时间调整',
+      content: '5 月 1 日至 5 月 3 日营业时间调整为 09:00-20:00，请提前预约。',
+      publishedAt: '2026-04-28 10:00',
+      updatedAt: '2026-04-28 10:00',
+    },
+    {
+      id: 'an2',
+      title: '静音区新增隔音耳塞领取点',
+      content: '静音区前台可免费领取一次性耳塞，先到先得。',
+      publishedAt: '2026-04-26 15:30',
+      updatedAt: '2026-04-26 15:30',
+    },
+  ]);
   const [breachRecords, setBreachRecords] = useState<BreachRecord[]>([
     { id: 'br1', at: '2026-03-10 14:20', reason: '预约未到场', phone: '13800000000' },
     { id: 'br2', at: '2026-03-18 10:05', reason: '预约未到场', phone: '13800000000' },
@@ -640,6 +672,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBreachRecords((list) => list.filter((b) => b.phone !== phone));
   }, []);
 
+  const adminCreateAnnouncement = useCallback(
+    (input: { title: string; content: string }) => {
+      const now = new Date().toLocaleString('zh-CN');
+      const item: Announcement = {
+        id: `AN${Date.now()}`,
+        title: input.title.trim(),
+        content: input.content.trim(),
+        publishedAt: now,
+        updatedAt: now,
+      };
+      setAnnouncements((list) => [item, ...list]);
+    },
+    []
+  );
+
+  const adminUpdateAnnouncement = useCallback(
+    (id: string, input: { title: string; content: string }) => {
+      const now = new Date().toLocaleString('zh-CN');
+      setAnnouncements((list) =>
+        list.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                title: input.title.trim(),
+                content: input.content.trim(),
+                updatedAt: now,
+              }
+            : item
+        )
+      );
+    },
+    []
+  );
+
+  const adminDeleteAnnouncement = useCallback((id: string) => {
+    setAnnouncements((list) => list.filter((item) => item.id !== id));
+  }, []);
+
   const value = useMemo<AppContextValue>(
     () => ({
       user,
@@ -649,6 +719,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cart,
       reservations,
       foodOrders,
+      announcements,
       breachRecords,
       breachCount,
       login,
@@ -681,6 +752,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       adminSetDeliveryStatus,
       adminMarkReservation,
       adminClearBreachLimit,
+      adminCreateAnnouncement,
+      adminUpdateAnnouncement,
+      adminDeleteAnnouncement,
     }),
     [
       user,
@@ -690,6 +764,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cart,
       reservations,
       foodOrders,
+      announcements,
       breachRecords,
       breachCount,
       login,
@@ -722,6 +797,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       adminSetDeliveryStatus,
       adminMarkReservation,
       adminClearBreachLimit,
+      adminCreateAnnouncement,
+      adminUpdateAnnouncement,
+      adminDeleteAnnouncement,
     ]
   );
 

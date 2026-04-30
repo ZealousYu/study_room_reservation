@@ -7,6 +7,7 @@ const nav = [
   { to: '/admin/seats', label: '座位管理' },
   { to: '/admin/reservations', label: '预约管理' },
   { to: '/admin/products', label: '商品管理' },
+  { to: '/admin/announcements', label: '公告管理' },
   { to: '/admin/orders', label: '订单管理' },
   { to: '/admin/breach', label: '违约管理' },
 ];

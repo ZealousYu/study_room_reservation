@@ -6,10 +6,12 @@ import { Dashboard } from './admin/pages/Dashboard';
 import { SeatsAdmin } from './admin/pages/SeatsAdmin';
 import { ReservationsAdmin } from './admin/pages/ReservationsAdmin';
 import { ProductsAdmin } from './admin/pages/ProductsAdmin';
+import { AnnouncementsAdmin } from './admin/pages/AnnouncementsAdmin';
 import { OrdersAdmin } from './admin/pages/OrdersAdmin';
 import { BreachAdmin } from './admin/pages/BreachAdmin';
 import { AppLayout } from './components/AppLayout';
 import { RequireAuth } from './components/RequireAuth';
+import { Announcements } from './pages/Announcements';
 import { Breach } from './pages/Breach';
 import { Booking } from './pages/Booking';
 import { Cart } from './pages/Cart';
@@ -42,6 +44,7 @@ export function App() {
         <Route path="seats" element={<SeatsAdmin />} />
         <Route path="reservations" element={<ReservationsAdmin />} />
         <Route path="products" element={<ProductsAdmin />} />
+        <Route path="announcements" element={<AnnouncementsAdmin />} />
         <Route path="orders" element={<OrdersAdmin />} />
         <Route path="breach" element={<BreachAdmin />} />
       </Route>
@@ -61,6 +64,7 @@ export function App() {
         <Route path="/orders" element={<Orders />} />
         <Route path="/reservations" element={<Reservations />} />
         <Route path="/breach" element={<Breach />} />
+        <Route path="/announcements" element={<Announcements />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
