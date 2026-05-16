@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 
 export function Home() {
-  const { user, reservations, checkIn } = useApp();
+  const { user, reservations, announcements, checkIn } = useApp();
 
   const ongoing = reservations.find(
     (r) => r.status === '进行中' && !r.checkInAt
@@ -31,6 +31,28 @@ export function Home() {
           </div>
         )}
       </header>
+
+      <section className="card home-notice-card" style={{ marginBottom: '0.85rem' }}>
+        <div className="home-notice-head">
+          <h3 style={{ margin: 0, fontSize: '1rem' }}>最新公告</h3>
+          <Link to="/announcements" style={{ fontSize: '0.78rem' }}>
+            查看更多
+          </Link>
+        </div>
+        {announcements.length === 0 ? (
+          <div className="home-notice-empty">当前暂无公告</div>
+        ) : (
+          <div className="home-notice-list">
+            {announcements.slice(0, 3).map((item) => (
+              <article key={item.id} className="home-notice-item">
+                <div className="home-notice-title">{item.title}</div>
+                <p className="home-notice-content">{item.content}</p>
+                <div className="home-notice-time">更新时间：{item.updatedAt}</div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="card" style={{ marginBottom: '0.85rem' }}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem' }}>快速开始</h3>
