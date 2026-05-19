@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -17,16 +18,10 @@ export type Seat = {
   hasLamp: boolean;
   hasDivider: boolean;
   nearWindow: boolean;
-  /** 是否对客开放预约 */
   enabled: boolean;
 };
 
-export type ReservationStatus =
-  | '待支付'
-  | '进行中'
-  | '已完成'
-  | '已取消'
-  | '违约';
+export type ReservationStatus = '待支付' | '进行中' | '已完成' | '已取消' | '违约';
 
 export type Reservation = {
   id: string;
@@ -50,13 +45,13 @@ export type Product = {
   rating: number;
   stock: number;
   onShelf: boolean;
+  picture?: string;
 };
 
 export type CartLine = { product: Product; qty: number };
 
 export type OrderStatus = '待支付' | '已支付' | '制作中' | '已完成' | '已取消';
 
-/** 配送/履约进度（与订单状态配合展示） */
 export type DeliveryStatus =
   | 'none'
   | 'await_checkin'
@@ -132,14 +127,16 @@ const SEED_SEATS: Omit<Seat, 'enabled'>[] = [
   { id: 's6', code: 'C-02', zone: '吧台区', hasOutlet: true, hasLamp: true, hasDivider: false, nearWindow: false },
 ];
 
-const SEED_PRODUCTS: Product[] = [
-  { id: 'p1', name: '燕麦拿铁', category: '咖啡', price: 28, desc: '燕麦奶与浓缩，温和不抢戏', rating: 4.8, stock: 50, onShelf: true },
-  { id: 'p2', name: '美式', category: '咖啡', price: 18, desc: '中深烘，适合长时间专注', rating: 4.6, stock: 80, onShelf: true },
-  { id: 'p3', name: '茉莉绿茶', category: '茶饮', price: 16, desc: '冷泡茉莉，清爽少负担', rating: 4.7, stock: 60, onShelf: true },
-  { id: 'p4', name: '柚子气泡', category: '茶饮', price: 22, desc: '微气泡，提神不腻', rating: 4.5, stock: 40, onShelf: true },
-  { id: 'p5', name: '巴斯克芝士', category: '甜品', price: 26, desc: '小块装，配咖啡刚好', rating: 4.9, stock: 30, onShelf: true },
-  { id: 'p6', name: '坚果能量棒', category: '小吃', price: 12, desc: '低糖，补充脑力', rating: 4.4, stock: 100, onShelf: true },
-];
+// 将后端数字分类映射为前端枚举
+function mapCategory(categoryNum: number): ProductCategory {
+  switch (categoryNum) {
+    case 1: return '咖啡';
+    case 2: return '茶饮';
+    case 3: return '甜品';
+    case 4: return '小吃';
+    default: return '小吃';
+  }
+}
 
 export function maskPhone(phone: string): string {
   if (phone.length !== 11) return phone;
@@ -197,9 +194,7 @@ type AppContextValue = {
   placeFoodOrder: (delivery: FoodOrder['delivery']) => FoodOrder | null;
   payFoodOrder: (orderId: string) => void;
   cancelFoodOrder: (orderId: string) => void;
-  createReservation: (
-    r: Omit<Reservation, 'id' | 'verifyCode' | 'status'>
-  ) => Reservation;
+  createReservation: (r: Omit<Reservation, 'id' | 'verifyCode' | 'status'>) => Reservation;
   payReservation: (id: string) => void;
   cancelReservation: (id: string) => { ok: boolean; message: string };
   checkIn: (reservationId: string) => void;
@@ -211,36 +206,19 @@ type AppContextValue = {
   }) => Seat[];
   isHourTakenForSeat: (seatCode: string, date: string, hour: number) => boolean;
   isSeatDateFullyBooked: (seatCode: string, date: string) => boolean;
-  canBookSlots: (
-    seatCode: string,
-    date: string,
-    slotLabels: string[]
-  ) => boolean;
+  canBookSlots: (seatCode: string, date: string, slotLabels: string[]) => boolean;
   waitlist: WaitlistEntry[];
-  joinWaitlist: (p: {
-    seatCode: string;
-    date: string;
-    slots: string[];
-  }) => WaitlistEntry;
+  joinWaitlist: (p: { seatCode: string; date: string; slots: string[] }) => WaitlistEntry;
   cancelWaitlist: (id: string) => void;
-  /** 管理端：座位启用 */
   setSeatEnabled: (seatId: string, enabled: boolean) => void;
-  /** 管理端：商品库存与上下架 */
   setProductStock: (productId: string, stock: number) => void;
   setProductOnShelf: (productId: string, onShelf: boolean) => void;
-  /** 管理端：点单订单状态与配送 */
   adminSetOrderStatus: (orderId: string, status: OrderStatus) => void;
   adminSetDeliveryStatus: (orderId: string, deliveryStatus: DeliveryStatus) => void;
-  /** 管理端：预约标记 */
   adminMarkReservation: (id: string, mark: '到场' | '违约') => void;
-  /** 管理端：违约记录 */
   adminClearBreachLimit: (phone: string) => void;
-  /** 管理端：公告管理 */
   adminCreateAnnouncement: (input: { title: string; content: string }) => void;
-  adminUpdateAnnouncement: (
-    id: string,
-    input: { title: string; content: string }
-  ) => void;
+  adminUpdateAnnouncement: (id: string, input: { title: string; content: string }) => void;
   adminDeleteAnnouncement: (id: string) => void;
 };
 
@@ -270,11 +248,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return null;
   });
 
-  const [seats, setSeats] = useState<Seat[]>(() =>
-    SEED_SEATS.map((s) => ({ ...s, enabled: true }))
-  );
-  const [products, setProducts] = useState<Product[]>(() => [...SEED_PRODUCTS]);
-
+  const [seats, setSeats] = useState<Seat[]>(() => SEED_SEATS.map((s) => ({ ...s, enabled: true })));
+  const [products, setProducts] = useState<Product[]>([]); // 不再使用硬编码数据
   const [cart, setCart] = useState<CartLine[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [foodOrders, setFoodOrders] = useState<FoodOrder[]>([]);
@@ -301,6 +276,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     { id: 'br3', at: '2026-04-01 16:40', reason: '预约未到场', phone: '13800000000' },
   ]);
   const breachCount = breachRecords.length;
+
+  // 从后端获取商品数据
+  useEffect(() => {
+    fetch('http://localhost:8080/api/products')
+      .then((res) => res.json())
+      .then((data) => {
+        const mappedProducts: Product[] = data.map((item: any) => ({
+          id: item.prodId.toString(),
+          name: item.name,
+          category: mapCategory(item.category),
+          price: item.price,
+          desc: item.description || '',
+          rating: 4.5, // 后端未提供评分，使用默认值
+          stock: item.stock,
+          onShelf: item.state === 1,
+          picture: item.picture, 
+        }));
+        setProducts(mappedProducts);
+      })
+      .catch((err) => console.error('获取商品列表失败', err));
+  }, []);
 
   const persistUser = useCallback((u: User | null) => {
     if (u) localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
@@ -356,7 +352,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!a || !password) {
         return { ok: false, message: '请输入账号和密码' };
       }
-      /** 演示：固定账号 admin / admin123，或任意非空密码通过 */
       if (a === 'admin' && password.length > 0) {
         const next = { account: 'admin', displayName: '管理员' };
         persistAdmin(next);
@@ -372,26 +367,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     persistAdmin(null);
   }, [persistAdmin]);
 
-  const addToCart = useCallback((product: Product, qty = 1) => {
-    if (!product.onShelf) {
-      return { ok: false, message: '商品已下架' };
-    }
-    const nextQty =
-      (cart.find((l) => l.product.id === product.id)?.qty ?? 0) + qty;
-    if (nextQty > product.stock) {
-      return { ok: false, message: '库存不足' };
-    }
-    setCart((prev) => {
-      const i = prev.findIndex((l) => l.product.id === product.id);
-      if (i >= 0) {
-        const next = [...prev];
-        next[i] = { ...next[i], qty: next[i].qty + qty };
-        return next;
+  const addToCart = useCallback(
+    (product: Product, qty = 1) => {
+      if (!product.onShelf) {
+        return { ok: false, message: '商品已下架' };
       }
-      return [...prev, { product, qty }];
-    });
-    return { ok: true, message: '已加入购物车' };
-  }, [cart]);
+      const nextQty = (cart.find((l) => l.product.id === product.id)?.qty ?? 0) + qty;
+      if (nextQty > product.stock) {
+        return { ok: false, message: '库存不足' };
+      }
+      setCart((prev) => {
+        const i = prev.findIndex((l) => l.product.id === product.id);
+        if (i >= 0) {
+          const next = [...prev];
+          next[i] = { ...next[i], qty: next[i].qty + qty };
+          return next;
+        }
+        return [...prev, { product, qty }];
+      });
+      return { ok: true, message: '已加入购物车' };
+    },
+    [cart]
+  );
 
   const setCartQty = useCallback((productId: string, qty: number) => {
     setCart((prev) => {
@@ -400,9 +397,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (qty <= 0) return prev.filter((l) => l.product.id !== productId);
       const p = line.product;
       const q = Math.min(qty, p.stock);
-      return prev.map((l) =>
-        l.product.id === productId ? { ...l, qty: q } : l
-      );
+      return prev.map((l) => (l.product.id === productId ? { ...l, qty: q } : l));
     });
   }, []);
 
@@ -477,9 +472,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const payReservation = useCallback((id: string) => {
-    setReservations((list) =>
-      list.map((x) => (x.id === id ? { ...x, status: '进行中' } : x))
-    );
+    setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '进行中' } : x)));
   }, []);
 
   const isHourTakenForSeat = useCallback(
@@ -493,9 +486,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           r.slots.includes(label)
       );
       const mockBusy =
-        (seatCode.charCodeAt(0) + hour * 3 + date.replaceAll('-', '').length) %
-          11 ===
-        0;
+        (seatCode.charCodeAt(0) + hour * 3 + date.replaceAll('-', '').length) % 11 === 0;
       return byBooking || mockBusy;
     },
     [reservations]
@@ -528,9 +519,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (r.status !== '待支付' && r.status !== '进行中') {
         return { ok: false, message: '当前状态不可取消' };
       }
-      setReservations((list) =>
-        list.map((x) => (x.id === id ? { ...x, status: '已取消' } : x))
-      );
+      setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '已取消' } : x)));
       return { ok: true, message: '已取消预约' };
     },
     [reservations]
@@ -553,9 +542,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const cancelWaitlist = useCallback((id: string) => {
-    setWaitlist((w) =>
-      w.map((x) => (x.id === id ? { ...x, status: '已取消' } : x))
-    );
+    setWaitlist((w) => w.map((x) => (x.id === id ? { ...x, status: '已取消' } : x)));
   }, []);
 
   const bumpDeliveryAfterCheckIn = useCallback(() => {
@@ -580,23 +567,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const checkIn = useCallback(
     (reservationId: string) => {
       const at = new Date().toLocaleString('zh-CN');
-      setReservations((list) =>
-        list.map((x) =>
-          x.id === reservationId ? { ...x, checkInAt: at } : x
-        )
-      );
+      setReservations((list) => list.map((x) => (x.id === reservationId ? { ...x, checkInAt: at } : x)));
       bumpDeliveryAfterCheckIn();
     },
     [bumpDeliveryAfterCheckIn]
   );
 
   const filterSeats = useCallback(
-    (filters: {
-      outlet?: boolean;
-      lamp?: boolean;
-      divider?: boolean;
-      window?: boolean;
-    }) => {
+    (filters: { outlet?: boolean; lamp?: boolean; divider?: boolean; window?: boolean }) => {
       return seats.filter((s) => {
         if (!s.enabled) return false;
         if (filters.outlet && !s.hasOutlet) return false;
@@ -610,23 +588,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const setSeatEnabled = useCallback((seatId: string, enabled: boolean) => {
-    setSeats((list) =>
-      list.map((s) => (s.id === seatId ? { ...s, enabled } : s))
-    );
+    setSeats((list) => list.map((s) => (s.id === seatId ? { ...s, enabled } : s)));
   }, []);
 
   const setProductStock = useCallback((productId: string, stock: number) => {
-    setProducts((list) =>
-      list.map((p) =>
-        p.id === productId ? { ...p, stock: Math.max(0, stock) } : p
-      )
-    );
+    setProducts((list) => list.map((p) => (p.id === productId ? { ...p, stock: Math.max(0, stock) } : p)));
   }, []);
 
   const setProductOnShelf = useCallback((productId: string, onShelf: boolean) => {
-    setProducts((list) =>
-      list.map((p) => (p.id === productId ? { ...p, onShelf } : p))
-    );
+    setProducts((list) => list.map((p) => (p.id === productId ? { ...p, onShelf } : p)));
   }, []);
 
   const adminSetOrderStatus = useCallback((orderId: string, status: OrderStatus) => {
@@ -636,56 +606,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? {
               ...o,
               status,
-              deliveryStatus:
-                status === '已取消' ? ('none' as DeliveryStatus) : o.deliveryStatus,
+              deliveryStatus: status === '已取消' ? ('none' as DeliveryStatus) : o.deliveryStatus,
             }
           : o
       )
     );
   }, []);
 
-  const adminSetDeliveryStatus = useCallback(
-    (orderId: string, deliveryStatus: DeliveryStatus) => {
-      setFoodOrders((orders) =>
-        orders.map((o) => (o.id === orderId ? { ...o, deliveryStatus } : o))
-      );
-    },
-    []
-  );
+  const adminSetDeliveryStatus = useCallback((orderId: string, deliveryStatus: DeliveryStatus) => {
+    setFoodOrders((orders) => orders.map((o) => (o.id === orderId ? { ...o, deliveryStatus } : o)));
+  }, []);
 
-  const adminMarkReservation = useCallback(
-    (id: string, mark: '到场' | '违约') => {
-      setReservations((list) =>
-        list.map((r) => {
-          if (r.id !== id) return r;
-          if (mark === '到场') {
-            return { ...r, status: '已完成' as ReservationStatus };
-          }
-          return { ...r, status: '违约' as ReservationStatus };
-        })
-      );
-    },
-    []
-  );
+  const adminMarkReservation = useCallback((id: string, mark: '到场' | '违约') => {
+    setReservations((list) =>
+      list.map((r) => {
+        if (r.id !== id) return r;
+        if (mark === '到场') {
+          return { ...r, status: '已完成' as ReservationStatus };
+        }
+        return { ...r, status: '违约' as ReservationStatus };
+      })
+    );
+  }, []);
 
   const adminClearBreachLimit = useCallback((phone: string) => {
     setBreachRecords((list) => list.filter((b) => b.phone !== phone));
   }, []);
 
-  const adminCreateAnnouncement = useCallback(
-    (input: { title: string; content: string }) => {
-      const now = new Date().toLocaleString('zh-CN');
-      const item: Announcement = {
-        id: `AN${Date.now()}`,
-        title: input.title.trim(),
-        content: input.content.trim(),
-        publishedAt: now,
-        updatedAt: now,
-      };
-      setAnnouncements((list) => [item, ...list]);
-    },
-    []
-  );
+  const adminCreateAnnouncement = useCallback((input: { title: string; content: string }) => {
+    const now = new Date().toLocaleString('zh-CN');
+    const item: Announcement = {
+      id: `AN${Date.now()}`,
+      title: input.title.trim(),
+      content: input.content.trim(),
+      publishedAt: now,
+      updatedAt: now,
+    };
+    setAnnouncements((list) => [item, ...list]);
+  }, []);
 
   const adminUpdateAnnouncement = useCallback(
     (id: string, input: { title: string; content: string }) => {
