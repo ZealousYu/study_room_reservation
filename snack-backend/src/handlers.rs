@@ -471,3 +471,27 @@ pub async fn checkin(
     }
     Ok(StatusCode::OK)
 }
+
+pub async fn get_my_breach(
+    Extension(claims): Extension<Claims>,
+    State(pool): State<MySqlPool>,
+) -> Result<Json<Vec<serde_json::Value>>, AppError> {
+    let user_id = claims.sub;
+    println!("当前登录用户的 userId: {}", user_id);  // 添加日志
+
+    let rows = sqlx::query!(
+        "SELECT violateTime as `violateTime`, reason FROM violation WHERE userId = ? ORDER BY violateTime DESC",
+        user_id
+    )
+    .fetch_all(&pool)
+    .await?;
+    println!("查询到 {} 条违约记录", rows.len());  // 添加日志
+
+    let records = rows.into_iter().map(|row| {
+        json!({
+            "at": row.violateTime,
+            "reason": row.reason,
+        })
+    }).collect();
+    Ok(Json(records))
+}

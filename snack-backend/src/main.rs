@@ -42,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/orders/:id/pay", post(pay_order))
         .route("/api/orders/:id/cancel", post(cancel_order))
         .route("/api/checkin", post(checkin))
+        .route("/api/breach", get(get_my_breach))   // 新增这一行
         .layer(middleware::from_fn(auth::auth_middleware));
 
     let app = Router::new()

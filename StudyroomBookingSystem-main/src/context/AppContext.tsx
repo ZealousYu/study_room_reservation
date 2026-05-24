@@ -270,12 +270,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updatedAt: '2026-04-26 15:30',
     },
   ]);
-  const [breachRecords, setBreachRecords] = useState<BreachRecord[]>([
-    { id: 'br1', at: '2026-03-10 14:20', reason: '预约未到场', phone: '13800000000' },
-    { id: 'br2', at: '2026-03-18 10:05', reason: '预约未到场', phone: '13800000000' },
-    { id: 'br3', at: '2026-04-01 16:40', reason: '预约未到场', phone: '13800000000' },
-  ]);
+  const [breachRecords, setBreachRecords] = useState<BreachRecord[]>([]);
   const breachCount = breachRecords.length;
+
+  const fetchBreachRecords = useCallback(async (token: string) => {
+    try {
+      const res = await fetch('http://localhost:8080/api/breach', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const records: BreachRecord[] = data.map((item: any) => ({
+          id: crypto.randomUUID(),   // 生成唯一 id（注意兼容性，也可用 Date.now()）
+          at: item.at,
+          reason: item.reason,
+          phone: undefined,
+        }));
+        setBreachRecords(records);
+      } else {
+        console.error('获取违约记录失败');
+      }
+    } catch (err) {
+      console.error('网络错误', err);
+    }
+  }, []);
 
   // 从后端获取商品数据
   useEffect(() => {
@@ -298,6 +316,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch((err) => console.error('获取商品列表失败', err));
   }, []);
 
+  //监听用户登录，用于个人中心  
+  useEffect(() => {
+    if (user) {
+      const token = localStorage.getItem('bookspace_token'); // 请根据实际存储的 key 调整
+      if (token) {
+        fetchBreachRecords(token);
+      }
+    }
+  }, [user, fetchBreachRecords]);
+
   const persistUser = useCallback((u: User | null) => {
     if (u) localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
     else localStorage.removeItem(STORAGE_KEY);
@@ -310,19 +338,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAdminUser(a);
   }, []);
 
-  const login = useCallback(
-    (phone: string, password: string) => {
-      if (!/^1[3-9]\d{9}$/.test(phone)) {
-        return { ok: false, message: '请输入有效的 11 位手机号' };
+const login = useCallback(
+  async (phone: string, password: string) => {
+    if (!/^1[3-9]\d{9}$/.test(phone)) {
+      return { ok: false, message: '请输入有效的 11 位手机号' };
+    }
+    if (password.length < 1) {
+      return { ok: false, message: '请输入密码' };
+    }
+
+    try {
+      const res = await fetch('http://localhost:8080/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, password }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        // 保存 token
+        localStorage.setItem('token', data.token);
+        // 保存用户信息（使用后端返回的真实姓名，若没有则用手机号后四位）
+        const userName = data.user.realName || `同学${phone.slice(-4)}`;
+        persistUser({ phone: data.user.phone, name: userName });
+        // 获取违约记录（个人中心需要 ）
+        await fetchBreachRecords(data.token);
+        return { ok: true, message: '登录成功' };
+      } else {
+        // 后端返回错误信息
+        return { ok: false, message: data.error || '登录失败，请检查账号或密码' };
       }
-      if (password.length < 1) {
-        return { ok: false, message: '请输入密码' };
-      }
-      persistUser({ phone, name: `同学${phone.slice(-4)}` });
-      return { ok: true, message: '登录成功' };
-    },
-    [persistUser]
-  );
+    } catch (err) {
+      console.error('登录网络错误', err);
+      return { ok: false, message: '网络错误，请稍后重试' };
+    }
+  },
+  [persistUser, fetchBreachRecords]
+);
 
   const register = useCallback(
     (phone: string, password: string) => {

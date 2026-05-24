@@ -73,7 +73,7 @@ export function Reservations() {
 
       <h2 style={{ fontSize: '1.05rem', margin: '1.5rem 0 0.5rem' }}>候补队列</h2>
       <p className="page-sub" style={{ marginTop: 0 }}>
-        约满时提交的期望时段，可在有空档时通知您（演示）
+        约满时提交的期望时段，可在有空档时通知您
       </p>
 
       {waitlist.filter((w) => w.status !== '已取消').length === 0 ? (

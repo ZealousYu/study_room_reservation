@@ -17,9 +17,9 @@ export function Login() {
     if (user) navigate(from, { replace: true });
   }, [user, navigate, from]);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    const r = login(phone, password);
+    const r = await login(phone, password);
     setToast(r.message);
     if (r.ok) {
       setTimeout(() => navigate(from, { replace: true }), 400);

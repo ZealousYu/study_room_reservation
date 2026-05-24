@@ -6,7 +6,7 @@ export function Breach() {
   return (
     <>
       <h1 className="page-title">违约记录</h1>
-      <p className="page-sub">累计 {breachCount} 次（演示数据）</p>
+      <p className="page-sub">累计 {breachCount} 次</p>
 
       {breachRecords.length === 0 ? (
         <p className="empty-hint card">暂无违约记录，继续保持～</p>

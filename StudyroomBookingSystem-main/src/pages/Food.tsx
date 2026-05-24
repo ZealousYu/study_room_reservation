@@ -93,7 +93,7 @@ export function Food() {
                   <img
                     src={imageUrl}
                     alt={p.name}
-                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     onError={() => setImgErrors((prev) => ({ ...prev, [p.id]: true }))}
                   />
                 ) : (
