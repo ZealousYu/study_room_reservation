@@ -309,7 +309,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           rating: 4.5, // 后端未提供评分，使用默认值
           stock: item.stock,
           onShelf: item.state === 1,
-          picture: item.picture, 
+          picture: item.picture,
         }));
         setProducts(mappedProducts);
       })
@@ -338,57 +338,79 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAdminUser(a);
   }, []);
 
-const login = useCallback(
-  async (phone: string, password: string) => {
-    if (!/^1[3-9]\d{9}$/.test(phone)) {
-      return { ok: false, message: '请输入有效的 11 位手机号' };
-    }
-    if (password.length < 1) {
-      return { ok: false, message: '请输入密码' };
-    }
-
-    try {
-      const res = await fetch('http://localhost:8080/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, password }),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        // 保存 token
-        localStorage.setItem('token', data.token);
-        // 保存用户信息（使用后端返回的真实姓名，若没有则用手机号后四位）
-        const userName = data.user.realName || `同学${phone.slice(-4)}`;
-        persistUser({ phone: data.user.phone, name: userName });
-        // 获取违约记录（个人中心需要 ）
-        await fetchBreachRecords(data.token);
-        return { ok: true, message: '登录成功' };
-      } else {
-        // 后端返回错误信息
-        return { ok: false, message: data.error || '登录失败，请检查账号或密码' };
-      }
-    } catch (err) {
-      console.error('登录网络错误', err);
-      return { ok: false, message: '网络错误，请稍后重试' };
-    }
-  },
-  [persistUser, fetchBreachRecords]
-);
-
-  const register = useCallback(
-    (phone: string, password: string) => {
+  const login = useCallback(
+    async (phone: string, password: string) => {
       if (!/^1[3-9]\d{9}$/.test(phone)) {
         return { ok: false, message: '请输入有效的 11 位手机号' };
       }
-      if (!/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,16}$/.test(password)) {
-        return {
-          ok: false,
-          message: '密码需为 8–16 位字母与数字组合',
-        };
+      if (password.length < 1) {
+        return { ok: false, message: '请输入密码' };
       }
-      persistUser({ phone, name: `新同学${phone.slice(-4)}` });
-      return { ok: true, message: '注册成功' };
+
+      try {
+        const res = await fetch('http://localhost:8080/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, password }),
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          // 保存 token
+          localStorage.setItem('token', data.token);
+          // 保存用户信息（使用后端返回的真实姓名，若没有则用手机号后四位）
+          const userName = data.user.realName || `同学${phone.slice(-4)}`;
+          persistUser({ phone: data.user.phone, name: userName });
+          // 获取违约记录（个人中心需要 ）
+          await fetchBreachRecords(data.token);
+          return { ok: true, message: '登录成功' };
+        } else {
+          // 后端返回错误信息
+          return { ok: false, message: data.error || '登录失败，请检查账号或密码' };
+        }
+      } catch (err) {
+        console.error('登录网络错误', err);
+        return { ok: false, message: '网络错误，请稍后重试' };
+      }
+    },
+    [persistUser, fetchBreachRecords]
+  );
+
+  const register = useCallback(
+    async (phone: string, password: string) => {
+      if (!/^1[3-9]\d{9}$/.test(phone)) {
+        return { ok: false, message: '请输入有效的 11 位手机号' };
+      }
+      if (password.length < 6) {
+        return { ok: false, message: '密码至少 6 位' };
+      }
+
+      try {
+        const res = await fetch('http://localhost:8080/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            password,
+            realName: `同学${phone.slice(-4)}`,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          localStorage.setItem('token', data.token);
+          persistUser({
+            phone: data.user.phone,
+            name: data.user.realName,
+          });
+          return { ok: true, message: '注册成功' };
+        } else {
+          return { ok: false, message: data.error || '注册失败' };
+        }
+      } catch {
+        return { ok: false, message: '网络错误' };
+      }
     },
     [persistUser]
   );
@@ -656,10 +678,10 @@ const login = useCallback(
       orders.map((o) =>
         o.id === orderId
           ? {
-              ...o,
-              status,
-              deliveryStatus: status === '已取消' ? ('none' as DeliveryStatus) : o.deliveryStatus,
-            }
+            ...o,
+            status,
+            deliveryStatus: status === '已取消' ? ('none' as DeliveryStatus) : o.deliveryStatus,
+          }
           : o
       )
     );
@@ -704,11 +726,11 @@ const login = useCallback(
         list.map((item) =>
           item.id === id
             ? {
-                ...item,
-                title: input.title.trim(),
-                content: input.content.trim(),
-                updatedAt: now,
-              }
+              ...item,
+              title: input.title.trim(),
+              content: input.content.trim(),
+              updatedAt: now,
+            }
             : item
         )
       );
