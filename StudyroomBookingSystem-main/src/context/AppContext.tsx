@@ -8,6 +8,28 @@ import {
   type ReactNode,
 } from 'react';
 
+export function mapReservationStatus(status: number): ReservationStatus {
+  switch (status) {
+    case 1: return '待支付';
+    case 2: return '进行中';
+    case 3: return '已完成';
+    case 0: return '已取消';
+    case 4: return '违约';
+    default: return '待支付';
+  }
+}
+
+export function mapOrderStatus(status: number): OrderStatus {
+  switch (status) {
+    case 1: return '待支付';
+    case 2: return '已支付';
+    case 3: return '制作中';
+    case 4: return '已完成';
+    case 5: return '已取消';
+    default: return '待支付';
+  }
+}
+
 export type Zone = '靠窗区' | '静音区' | '吧台区';
 
 export type Seat = {
@@ -184,6 +206,7 @@ type AppContextValue = {
   breachCount: number;
   login: (phone: string, password: string) => { ok: boolean; message: string };
   register: (phone: string, password: string) => { ok: boolean; message: string };
+  resetPassword: (phone: string, code: string, newPassword: string) => Promise<{ ok: boolean; message: string }>;
   logout: () => void;
   adminLogin: (account: string, password: string) => { ok: boolean; message: string };
   adminLogout: () => void;
@@ -415,6 +438,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [persistUser]
   );
 
+  const resetPassword = useCallback(
+    async (phone: string, code: string, newPassword: string) => {
+      if (newPassword.length < 8) {
+        return { ok: false, message: '密码至少 8 位' };
+      }
+
+      try {
+        const res = await fetch('http://localhost:8080/api/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            code,
+            new_password: newPassword,
+          }),
+        });
+
+        const data = await res.json();
+        return { ok: res.ok, message: data.message || '密码重置成功' };
+      } catch {
+        return { ok: false, message: '网络错误' };
+      }
+    },
+    []
+  );
+
   const logout = useCallback(() => {
     persistUser(null);
     setCart([]);
@@ -491,7 +540,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         items: cart.map((l) => ({ ...l })),
         total,
         delivery,
-        status: '待支付',
+        status: mapOrderStatus(1),
         deliveryStatus: 'none',
       };
       setFoodOrders((o) => [order, ...o]);
@@ -536,7 +585,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const res: Reservation = {
         ...r,
         id: `RV${Date.now()}`,
-        status: '待支付',
+        status: mapReservationStatus(1),
         verifyCode: Math.random().toString(36).slice(2, 10).toUpperCase(),
       };
       setReservations((list) => [res, ...list]);
@@ -546,7 +595,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const payReservation = useCallback((id: string) => {
-    setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '进行中' } : x)));
+    setReservations((list) => list.map((x) =>
+      x.id === id ? { ...x, status: mapReservationStatus(2) } : x
+    ));
   }, []);
 
   const isHourTakenForSeat = useCallback(
@@ -593,7 +644,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (r.status !== '待支付' && r.status !== '进行中') {
         return { ok: false, message: '当前状态不可取消' };
       }
-      setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '已取消' } : x)));
+      setReservations((list) => list.map((x) =>
+        x.id === id ? { ...x, status: mapReservationStatus(0) } : x
+      ));
       return { ok: true, message: '已取消预约' };
     },
     [reservations]
@@ -696,9 +749,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       list.map((r) => {
         if (r.id !== id) return r;
         if (mark === '到场') {
-          return { ...r, status: '已完成' as ReservationStatus };
+          return { ...r, status: mapReservationStatus(3) };
         }
-        return { ...r, status: '违约' as ReservationStatus };
+        return { ...r, status: mapReservationStatus(4) };
       })
     );
   }, []);
@@ -756,6 +809,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       breachCount,
       login,
       register,
+      resetPassword,
       logout,
       adminLogin,
       adminLogout,
@@ -801,6 +855,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       breachCount,
       login,
       register,
+      resetPassword,
       logout,
       adminLogin,
       adminLogout,

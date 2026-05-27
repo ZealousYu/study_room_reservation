@@ -12,7 +12,7 @@ export function Home() {
     <>
       <header className="hero-banner">
         <h2>你好，{user?.name ?? '访客'} · 今天也要专注一点点</h2>
-        <p>选座、点单、打卡，都在下面 — 界面为演示数据，未接后端。</p>
+        <p>选座、点单、打卡，都在下面</p>
         {ongoing && (
           <div className="checkin-bar">
             <span style={{ fontSize: '0.88rem' }}>

@@ -64,17 +64,19 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+#[derive(Debug, Deserialize)]
 pub struct ResetPasswordRequest {
     pub phone: String,
-    pub old_password: String,
-    pub new_password: String,
+    pub code: String,         
+    pub new_password: String,  
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct CreateReservationRequest {
-    pub res_id: i32,
-    pub start_time: String,
-    pub end_time: String,
+    pub res_id: i32,          
+    pub start_time: String,  
+    pub end_time: String,    
+    pub amount: f64,         
 }
 
 #[derive(Deserialize)]
@@ -90,15 +92,18 @@ pub struct QuerySeatsRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateOrderRequest {
-    pub items: Vec<OrderItemInput>,
-    pub deliveryType: i32,
-    pub revId: Option<i32>,
+    pub user_id: i32,
+    pub reservation_id: Option<i32>,
+    pub total_amount: f64,
+    pub delivery_type: i32, // 1=配送 2=自取
+    pub items: Vec<OrderItem>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct OrderItemInput {
-    pub prodId: i32,
+pub struct OrderItem {
+    pub prod_id: i32,
     pub quantity: i32,
+    pub price: f64, // 单价（元）
 }
 
 #[derive(Debug, Deserialize)]

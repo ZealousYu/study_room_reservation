@@ -7,11 +7,10 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
+use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::{NaiveDateTime, Utc};
-use rand::Rng;
 use serde_json::json;
 use sqlx::{MySqlPool, Row};
-use bcrypt::{hash, verify, DEFAULT_COST};
 
 fn cents_to_yuan(cents: i64) -> f64 {
     cents as f64 / 100.0
@@ -25,7 +24,7 @@ pub async fn register(
     if !req.phone.starts_with('1') || req.phone.len() != 11 {
         return Err(AppError::BadRequest);
     }
-    if req.password.len() < 6 {
+    if req.password.len() < 8 {
         return Err(AppError::BadRequest);
     }
     let real_name = req
@@ -38,8 +37,7 @@ pub async fn register(
         return Err(AppError::DuplicateEntry);
     }
     let account = format!("u{}", &req.phone[3..]);
-    let password_hash = hash(&req.password, DEFAULT_COST)
-        .map_err(|_| AppError::InternalError)?;
+    let password_hash = hash(&req.password, DEFAULT_COST).map_err(|_| AppError::InternalError)?;
     sqlx::query!(
         "INSERT INTO users (account, password, realName, userType, phone, state) VALUES (?, ?, ?, 1, ?, 1)",
         account,
@@ -88,8 +86,7 @@ pub async fn login(
 
     let stored_hash = row.password.ok_or(AppError::InternalError)?;
 
-    let is_valid =
-        verify(&req.password, &stored_hash).map_err(|_| AppError::InternalError)?;
+    let is_valid = verify(&req.password, &stored_hash).map_err(|_| AppError::InternalError)?;
 
     if !is_valid {
         return Err(AppError::Unauthorized);
@@ -114,40 +111,27 @@ pub async fn reset_password(
     State(pool): State<MySqlPool>,
     Json(req): Json<ResetPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if !req.phone.starts_with('1') || req.phone.len() != 11 {
-        return Err(AppError::BadRequest);
-    }
-
-    if req.new_password.len() < 6 {
+    if req.code != "123456" {
         return Err(AppError::BadRequest);
     }
 
     let row = sqlx::query!(
-        "SELECT userId, password FROM users WHERE phone = ? AND state = 1",
+        "SELECT userId FROM users WHERE phone = ? AND state = 1",
         req.phone
     )
     .fetch_optional(&pool)
-    .await?
-    .ok_or(AppError::Unauthorized)?;
+    .await?;
+    let row = row.ok_or(AppError::Unauthorized)?;
 
-    let stored_hash = row.password.ok_or(AppError::InternalError)?;
-    let is_valid = verify(&req.old_password, &stored_hash)
-        .map_err(|_| AppError::InternalError)?;
+    let new_hash = hash(&req.new_password, DEFAULT_COST).map_err(|e| AppError::InternalError)?;
 
-    if !is_valid {
-        return Err(AppError::Unauthorized);
-    }
-
-    let new_hash = hash(&req.new_password, DEFAULT_COST)
-        .map_err(|_| AppError::InternalError)?;
-
-    sqlx::query!(
+    let result = sqlx::query!(
         "UPDATE users SET password = ? WHERE userId = ?",
         new_hash,
         row.userId
     )
     .execute(&pool)
-    .await?;
+    .await;
 
     Ok(Json(json!({ "message": "密码重置成功" })))
 }
@@ -161,68 +145,30 @@ pub async fn create_reservation(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let user_id = claims.sub;
 
-    let start_time = NaiveDateTime::parse_from_str(&req.start_time, "%Y-%m-%d %H:%M:%S")
+    // 解析时间字符串
+    let start_time = chrono::NaiveDateTime::parse_from_str(&req.start_time, "%Y-%m-%d %H:%M:%S")
         .map_err(|_| AppError::BadRequest)?;
-    let end_time = NaiveDateTime::parse_from_str(&req.end_time, "%Y-%m-%d %H:%M:%S")
+
+    let end_time = chrono::NaiveDateTime::parse_from_str(&req.end_time, "%Y-%m-%d %H:%M:%S")
         .map_err(|_| AppError::BadRequest)?;
 
-    if start_time >= end_time || start_time < Utc::now().naive_local() {
-        return Err(AppError::BadRequest);
-    }
-
-    let conflict = sqlx::query!(
-        "SELECT revId FROM reservation 
-         WHERE resId = ? AND status = 1
-         AND ((startTime <= ? AND endTime > ?) 
-              OR (startTime < ? AND endTime >= ?) 
-              OR (startTime >= ? AND endTime <= ?))",
-        req.res_id,
-        start_time, start_time,
-        end_time, end_time,
-        start_time, end_time
-    )
-    .fetch_optional(&pool)
-    .await?;
-
-    if conflict.is_some() {
-        return Err(AppError::BadRequest);
-    }
-
-    let existing = sqlx::query!(
-        "SELECT revId FROM reservation 
-         WHERE userId = ? AND status = 1 AND endTime > NOW()",
-        user_id
-    )
-    .fetch_optional(&pool)
-    .await?;
-
-    if existing.is_some() {
-        return Err(AppError::BadRequest);
-    }
-
-    let now = Utc::now().naive_local();
-
-    let result = sqlx::query!(
-        "INSERT INTO reservation (userId, resId, startTime, endTime, status, createTime, amount) 
-         VALUES (?, ?, ?, ?, 1, ?, 0.00)",
+    let rev_id = sqlx::query!(
+        r#"
+        INSERT INTO reservation
+        (userId, resId, startTime, endTime, status, createTime, amount)
+        VALUES (?, ?, ?, ?, 1, NOW(), ?)
+        "#,
         user_id,
         req.res_id,
         start_time,
         end_time,
-        now
+        req.amount
     )
     .execute(&pool)
-    .await?;
+    .await?
+    .last_insert_id();
 
-    let rev_id = result.last_insert_id() as i32;
-
-    Ok(Json(json!({
-        "revId": rev_id,
-        "resId": req.res_id,
-        "startTime": start_time,
-        "endTime": end_time,
-        "status": 1,
-    })))
+    Ok(Json(json!({ "reservationId": rev_id })))
 }
 
 // ---------- 获取我的预约列表 ----------
@@ -413,91 +359,40 @@ pub async fn get_product(
 #[debug_handler]
 pub async fn create_order(
     State(pool): State<MySqlPool>,
-    Extension(claims): Extension<Claims>,
-    Json(order_req): Json<CreateOrderRequest>,
+    Json(req): Json<CreateOrderRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user_id = claims.sub;
-    if order_req.items.is_empty() {
-        return Err(AppError::BadRequest);
-    }
-    if order_req.deliveryType != 1 && order_req.deliveryType != 2 {
-        return Err(AppError::BadRequest);
-    }
-    if order_req.deliveryType == 1 && order_req.revId.is_none() {
-        return Err(AppError::BadRequest);
-    }
+    let order_no = format!("ORD{}", chrono::Utc::now().timestamp());
+    let total_cents = (req.total_amount * 100.0) as i64;
 
     let mut tx = pool.begin().await?;
-    let mut total_cents: i64 = 0;
-    let mut items_info = Vec::new();
 
-    for item in &order_req.items {
-        let prod = sqlx::query!(
-            "SELECT prodId, price, stock, state FROM product WHERE prodId = ? FOR UPDATE",
-            item.prodId
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
-        if prod.state != 1 {
-            return Err(AppError::BadRequest);
-        }
-        if prod.stock < item.quantity {
-            return Err(AppError::InsufficientStock);
-        }
-        let price_cents = prod.price.ok_or(AppError::InternalError)?;
-        total_cents += price_cents * item.quantity as i64;
-        items_info.push((prod.prodId, item.quantity, price_cents));
-    }
-
-    for (prod_id, qty, _) in &items_info {
-        sqlx::query!(
-            "UPDATE product SET stock = stock - ? WHERE prodId = ?",
-            qty,
-            prod_id
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    let now = Utc::now();
-    let random_suffix: u16 = rand::thread_rng().gen_range(0..10000);
-    let order_no = format!(
-        "F{}{:03}{:04}",
-        now.format("%Y%m%d%H%M%S"),
-        user_id,
-        random_suffix
-    );
-    let rev_id = if order_req.deliveryType == 1 {
-        order_req.revId
-    } else {
-        None
-    };
-
-    sqlx::query!(
-        "INSERT INTO foodorder (orderNo, userId, revId, totalAmount, deliveryType, status, createTime)
-         VALUES (?, ?, ?, ?, ?, 1, ?)",
+    // 1️⃣ 插入主订单
+    let order_id = sqlx::query!(
+        r#"
+        INSERT INTO foodorder
+        (orderNo, userId, revId, totalAmount, deliveryType, status, createTime)
+        VALUES (?, ?, ?, ?, ?, 1, NOW())
+        "#,
         order_no,
-        user_id,
-        rev_id,
+        req.user_id,
+        req.reservation_id,
         total_cents,
-        order_req.deliveryType,
-        now
+        req.delivery_type
     )
     .execute(&mut *tx)
-    .await?;
+    .await?
+    .last_insert_id();
 
-    let order_id = sqlx::query!("SELECT LAST_INSERT_ID() as id")
-        .fetch_one(&mut *tx)
-        .await?
-        .id;
-
-    for (prod_id, qty, price_cents) in items_info {
+    for item in req.items {
+        let price_cents = (item.price * 100.0) as i64;
         sqlx::query!(
-            "INSERT INTO orderdetail (orderId, prodId, quantity, price) VALUES (?, ?, ?, ?)",
+            r#"
+            INSERT INTO orderdetail (orderId, prodId, quantity, price)
+            VALUES (?, ?, ?, ?)
+            "#,
             order_id,
-            prod_id,
-            qty,
+            item.prod_id,
+            item.quantity,
             price_cents
         )
         .execute(&mut *tx)
@@ -505,14 +400,9 @@ pub async fn create_order(
     }
 
     tx.commit().await?;
-    Ok(Json(json!({
-        "orderId": order_id,
-        "orderNo": order_no,
-        "totalAmount": cents_to_yuan(total_cents),
-        "status": 1
-    })))
-}
 
+    Ok(Json(json!({ "orderId": order_id })))
+}
 // ---------- 用户订单列表 ----------
 pub async fn get_user_orders(
     State(pool): State<MySqlPool>,
