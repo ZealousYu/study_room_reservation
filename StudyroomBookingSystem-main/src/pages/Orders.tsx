@@ -1,14 +1,27 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { formatDeliveryStatus, useApp } from '../context/AppContext';
 import { Toast } from '../components/Toast';
 
 export function Orders() {
   const { foodOrders, payFoodOrder, cancelFoodOrder } = useApp();
   const [toast, setToast] = useState<string | null>(null);
+  // 防止重复点击，但不影响按钮外观
+  const processingRef = useRef<string | null>(null);
 
-  function pay(orderId: string) {
-    payFoodOrder(orderId);
+  async function pay(orderId: string) {
+    if (processingRef.current) return;
+    processingRef.current = orderId;
+    await payFoodOrder(orderId);
+    processingRef.current = null;
     setToast('支付成功');
+  }
+
+  async function handleCancel(orderId: string) {
+    if (processingRef.current) return;
+    processingRef.current = orderId;
+    await cancelFoodOrder(orderId);
+    processingRef.current = null;
+    setToast('订单已取消');
   }
 
   return (
@@ -22,14 +35,14 @@ export function Orders() {
         foodOrders.map((o) => (
           <div key={o.id} className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <strong>{o.id}</strong>
+              <strong>{o.orderNo}</strong>
               <span
                 className={`badge ${
                   o.status === '待支付'
                     ? 'badge-warn'
                     : o.status === '已取消'
-                      ? 'badge-muted'
-                      : 'badge-ok'
+                    ? 'badge-muted'
+                    : 'badge-ok'
                 }`}
               >
                 {o.status}
@@ -42,8 +55,8 @@ export function Orders() {
               配送/履约：{formatDeliveryStatus(o)}
             </div>
             <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.1rem', fontSize: '0.9rem' }}>
-              {o.items.map((l) => (
-                <li key={l.product.id}>
+              {o.items.map((l, idx) => (
+                <li key={idx}>
                   {l.product.name} × {l.qty}
                 </li>
               ))}
@@ -63,10 +76,7 @@ export function Orders() {
                   type="button"
                   className="btn btn-ghost"
                   style={{ fontSize: '0.88rem' }}
-                  onClick={() => {
-                    cancelFoodOrder(o.id);
-                    setToast('订单已取消');
-                  }}
+                  onClick={() => handleCancel(o.id)}
                 >
                   取消
                 </button>

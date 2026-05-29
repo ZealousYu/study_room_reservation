@@ -1,18 +1,28 @@
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { Toast } from '../components/Toast';
+import { useState } from 'react';
 
 export function Home() {
   const { user, reservations, announcements, checkIn } = useApp();
+  const [toast, setToast] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
 
-  const ongoing = reservations.find(
-    (r) => r.status === '进行中' && !r.checkInAt
-  );
+  const ongoing = reservations.find((r) => r.status === '进行中' && !r.checkInAt);
+
+  async function handleCheckIn() {
+    if (!ongoing) return;
+    setChecking(true);
+    await checkIn(parseInt(ongoing.id));
+    setChecking(false);
+    setToast('打卡成功，配送订单已开始制作');
+  }
 
   return (
     <>
       <header className="hero-banner">
         <h2>你好，{user?.name ?? '访客'} · 今天也要专注一点点</h2>
-        <p>选座、点单、打卡，都在下面 — 界面为演示数据，未接后端。</p>
+        <p>选座、点单、打卡，都在下面 — 现已对接后端，订单持久化存储。</p>
         {ongoing && (
           <div className="checkin-bar">
             <span style={{ fontSize: '0.88rem' }}>
@@ -24,9 +34,10 @@ export function Home() {
               type="button"
               className="btn btn-primary"
               style={{ padding: '0.45rem 0.9rem', fontSize: '0.88rem' }}
-              onClick={() => checkIn(ongoing.id)}
+              onClick={handleCheckIn}
+              disabled={checking}
             >
-              立即打卡
+              {checking ? '打卡中...' : '立即打卡'}
             </button>
           </div>
         )}
@@ -115,6 +126,8 @@ export function Home() {
           <li>未支付订单 30 分钟会自动取消（演示中可手动取消）。</li>
         </ul>
       </section>
+
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </>
   );
 }

@@ -24,7 +24,7 @@ export type Seat = {
 export type ReservationStatus = '待支付' | '进行中' | '已完成' | '已取消' | '违约';
 
 export type Reservation = {
-  id: string;
+  id: string;          // 前端使用字符串，实际对应后端的 revId (number)
   seatCode: string;
   date: string;
   slots: string[];
@@ -45,7 +45,7 @@ export type Product = {
   rating: number;
   stock: number;
   onShelf: boolean;
-  picture?: string;
+  picture?: string;     // 新增图片字段
 };
 
 export type CartLine = { product: Product; qty: number };
@@ -63,9 +63,10 @@ export type DeliveryStatus =
   | 'completed';
 
 export type FoodOrder = {
-  id: string;
+  id: string;           // 实际为 orderId 数字转字符串
+  orderNo: string;      // 订单号，用于前端展示
   createdAt: string;
-  items: CartLine[];
+  items: { product: { id: string; name: string; price: number }; qty: number }[];
   total: number;
   delivery: '配送至座位' | '吧台自取';
   status: OrderStatus;
@@ -127,7 +128,7 @@ const SEED_SEATS: Omit<Seat, 'enabled'>[] = [
   { id: 's6', code: 'C-02', zone: '吧台区', hasOutlet: true, hasLamp: true, hasDivider: false, nearWindow: false },
 ];
 
-// 将后端数字分类映射为前端枚举
+// 后端数字分类映射
 function mapCategory(categoryNum: number): ProductCategory {
   switch (categoryNum) {
     case 1: return '咖啡';
@@ -135,6 +136,35 @@ function mapCategory(categoryNum: number): ProductCategory {
     case 3: return '甜品';
     case 4: return '小吃';
     default: return '小吃';
+  }
+}
+
+// 后端订单状态映射
+function mapOrderStatus(statusNum: number): OrderStatus {
+  switch (statusNum) {
+    case 1: return '待支付';
+    case 2: return '已支付';
+    case 3: return '制作中';
+    case 4: return '已完成';
+    case 5: return '已取消';
+    default: return '待支付';
+  }
+}
+
+// 根据订单状态和配送方式推导 deliveryStatus（前端展示用）
+function deriveDeliveryStatus(order: { status: OrderStatus; delivery: '配送至座位' | '吧台自取' }): DeliveryStatus {
+  if (order.status === '待支付') return 'none';
+  if (order.status === '已取消') return 'none';
+  if (order.delivery === '吧台自取') {
+    if (order.status === '已完成') return 'completed';
+    if (order.status === '制作中') return 'pickup_ready';
+    return 'pickup_ready';
+  } else {
+    // 配送至座位
+    if (order.status === '已支付') return 'await_checkin';
+    if (order.status === '制作中') return 'making';
+    if (order.status === '已完成') return 'completed';
+    return 'await_checkin';
   }
 }
 
@@ -171,6 +201,27 @@ export function formatDeliveryStatus(
   }
 }
 
+// API 请求辅助函数
+async function apiRequest<T>(
+  url: string,
+  options?: RequestInit
+): Promise<T> {
+  const token = localStorage.getItem('bookspace_token');
+  const res = await fetch(`http://localhost:8080${url}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options?.headers,
+    },
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: '请求失败' }));
+    throw new Error(error.error || '请求失败');
+  }
+  return res.json();
+}
+
 type AppContextValue = {
   user: User | null;
   adminUser: AdminUser | null;
@@ -182,8 +233,8 @@ type AppContextValue = {
   announcements: Announcement[];
   breachRecords: BreachRecord[];
   breachCount: number;
-  login: (phone: string, password: string) => { ok: boolean; message: string };
-  register: (phone: string, password: string) => { ok: boolean; message: string };
+  login: (phone: string, password: string) => Promise<{ ok: boolean; message: string }>;
+  register: (phone: string, password: string) => Promise<{ ok: boolean; message: string }>;
   logout: () => void;
   adminLogin: (account: string, password: string) => { ok: boolean; message: string };
   adminLogout: () => void;
@@ -191,13 +242,13 @@ type AppContextValue = {
   setCartQty: (productId: string, qty: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
-  placeFoodOrder: (delivery: FoodOrder['delivery']) => FoodOrder | null;
-  payFoodOrder: (orderId: string) => void;
-  cancelFoodOrder: (orderId: string) => void;
+  placeFoodOrder: (delivery: FoodOrder['delivery'], revId?: number) => Promise<{ orderId: string; total: number } | null>;
+  payFoodOrder: (orderId: string) => Promise<void>;
+  cancelFoodOrder: (orderId: string) => Promise<void>;
   createReservation: (r: Omit<Reservation, 'id' | 'verifyCode' | 'status'>) => Reservation;
   payReservation: (id: string) => void;
   cancelReservation: (id: string) => { ok: boolean; message: string };
-  checkIn: (reservationId: string) => void;
+  checkIn: (reservationId: number) => Promise<void>;
   filterSeats: (filters: {
     outlet?: boolean;
     lamp?: boolean;
@@ -226,6 +277,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 const STORAGE_KEY = 'bookspace_user_v1';
 const ADMIN_KEY = 'bookspace_admin_v1';
+const TOKEN_KEY = 'bookspace_token';
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
@@ -249,7 +301,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   const [seats, setSeats] = useState<Seat[]>(() => SEED_SEATS.map((s) => ({ ...s, enabled: true })));
-  const [products, setProducts] = useState<Product[]>([]); // 不再使用硬编码数据
+  const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [foodOrders, setFoodOrders] = useState<FoodOrder[]>([]);
@@ -273,58 +325,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [breachRecords, setBreachRecords] = useState<BreachRecord[]>([]);
   const breachCount = breachRecords.length;
 
-  const fetchBreachRecords = useCallback(async (token: string) => {
+  // 加载订单列表
+  const loadOrders = useCallback(async (token?: string) => {
+    const t = token || localStorage.getItem(TOKEN_KEY);
+    if (!t) return;
     try {
-      const res = await fetch('http://localhost:8080/api/breach', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const records: BreachRecord[] = data.map((item: any) => ({
-          id: crypto.randomUUID(),   // 生成唯一 id（注意兼容性，也可用 Date.now()）
-          at: item.at,
-          reason: item.reason,
-          phone: undefined,
-        }));
-        setBreachRecords(records);
-      } else {
-        console.error('获取违约记录失败');
-      }
+      const data = await apiRequest<any[]>('/api/orders');
+      const converted: FoodOrder[] = data.map(order => ({
+        id: order.orderId.toString(),
+        orderNo: order.orderNo,        
+        createdAt: order.createTime,
+        items: order.items.map((item: any) => ({
+          product: {
+            id: item.prodId.toString(),
+            name: item.name,
+            price: item.price,
+          } as Product,
+          qty: item.quantity,
+        })),
+        total: order.totalAmount,
+        delivery: order.deliveryType === 1 ? '配送至座位' : '吧台自取',
+        status: mapOrderStatus(order.status),
+        deliveryStatus: deriveDeliveryStatus({
+          status: mapOrderStatus(order.status),
+          delivery: order.deliveryType === 1 ? '配送至座位' : '吧台自取',
+        }),
+      }));
+      setFoodOrders(converted);
     } catch (err) {
-      console.error('网络错误', err);
+      console.error('加载订单失败', err);
     }
   }, []);
 
-  // 从后端获取商品数据
+  // 获取商品列表
   useEffect(() => {
     fetch('http://localhost:8080/api/products')
       .then((res) => res.json())
       .then((data) => {
-        const mappedProducts: Product[] = data.map((item: any) => ({
+        const mapped: Product[] = data.map((item: any) => ({
           id: item.prodId.toString(),
           name: item.name,
           category: mapCategory(item.category),
           price: item.price,
           desc: item.description || '',
-          rating: 4.5, // 后端未提供评分，使用默认值
+          rating: 4.5,
           stock: item.stock,
           onShelf: item.state === 1,
-          picture: item.picture, 
+          picture: item.picture,
         }));
-        setProducts(mappedProducts);
+        setProducts(mapped);
       })
-      .catch((err) => console.error('获取商品列表失败', err));
+      .catch((err) => console.error('获取商品失败', err));
   }, []);
 
-  //监听用户登录，用于个人中心  
+  // 自动恢复登录状态并加载订单
   useEffect(() => {
-    if (user) {
-      const token = localStorage.getItem('bookspace_token'); // 请根据实际存储的 key 调整
-      if (token) {
-        fetchBreachRecords(token);
+    const token = localStorage.getItem(TOKEN_KEY);
+    const savedUser = localStorage.getItem(STORAGE_KEY);
+    if (token && savedUser) {
+      try {
+        const userData = JSON.parse(savedUser);
+        setUser(userData);
+        loadOrders(token);
+      } catch (err) {
+        console.error('恢复登录失败', err);
       }
     }
-  }, [user, fetchBreachRecords]);
+  }, [loadOrders]);
 
   const persistUser = useCallback((u: User | null) => {
     if (u) localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
@@ -338,75 +405,79 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAdminUser(a);
   }, []);
 
-const login = useCallback(
-  async (phone: string, password: string) => {
-    if (!/^1[3-9]\d{9}$/.test(phone)) {
-      return { ok: false, message: '请输入有效的 11 位手机号' };
-    }
-    if (password.length < 1) {
-      return { ok: false, message: '请输入密码' };
-    }
-
-    try {
-      const res = await fetch('http://localhost:8080/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, password }),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        // 保存 token
-        localStorage.setItem('token', data.token);
-        // 保存用户信息（使用后端返回的真实姓名，若没有则用手机号后四位）
-        const userName = data.user.realName || `同学${phone.slice(-4)}`;
-        persistUser({ phone: data.user.phone, name: userName });
-        // 获取违约记录（个人中心需要 ）
-        await fetchBreachRecords(data.token);
-        return { ok: true, message: '登录成功' };
-      } else {
-        // 后端返回错误信息
-        return { ok: false, message: data.error || '登录失败，请检查账号或密码' };
+  const login = useCallback(
+    async (phone: string, password: string) => {
+      if (!/^1[3-9]\d{9}$/.test(phone)) {
+        return { ok: false, message: '请输入有效的 11 位手机号' };
       }
-    } catch (err) {
-      console.error('登录网络错误', err);
-      return { ok: false, message: '网络错误，请稍后重试' };
-    }
-  },
-  [persistUser, fetchBreachRecords]
-);
+      try {
+        const res = await fetch('http://localhost:8080/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, password }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          localStorage.setItem(TOKEN_KEY, data.token);
+          const userName = data.user.realName || `同学${phone.slice(-4)}`;
+          persistUser({ phone: data.user.phone, name: userName });
+          await loadOrders(data.token);
+          return { ok: true, message: '登录成功' };
+        } else {
+          return { ok: false, message: data.error || '登录失败' };
+        }
+      } catch (err) {
+        console.error('登录错误', err);
+        return { ok: false, message: '网络错误，请稍后重试' };
+      }
+    },
+    [persistUser, loadOrders]
+  );
 
   const register = useCallback(
-    (phone: string, password: string) => {
+    async (phone: string, password: string) => {
       if (!/^1[3-9]\d{9}$/.test(phone)) {
         return { ok: false, message: '请输入有效的 11 位手机号' };
       }
       if (!/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,16}$/.test(password)) {
-        return {
-          ok: false,
-          message: '密码需为 8–16 位字母与数字组合',
-        };
+        return { ok: false, message: '密码需为 8–16 位字母与数字组合' };
       }
-      persistUser({ phone, name: `新同学${phone.slice(-4)}` });
-      return { ok: true, message: '注册成功' };
+      try {
+        const res = await fetch('http://localhost:8080/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, password, realName: `同学${phone.slice(-4)}` }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          localStorage.setItem(TOKEN_KEY, data.token);
+          persistUser({ phone: data.user.phone, name: data.user.realName });
+          await loadOrders(data.token);
+          return { ok: true, message: '注册成功' };
+        } else {
+          return { ok: false, message: data.error || '注册失败' };
+        }
+      } catch (err) {
+        return { ok: false, message: '网络错误' };
+      }
     },
-    [persistUser]
+    [persistUser, loadOrders]
   );
 
   const logout = useCallback(() => {
     persistUser(null);
+    localStorage.removeItem(TOKEN_KEY);
     setCart([]);
+    setFoodOrders([]);
+    setBreachRecords([]);
   }, [persistUser]);
 
   const adminLogin = useCallback(
     (account: string, password: string) => {
       const a = account.trim();
-      if (!a || !password) {
-        return { ok: false, message: '请输入账号和密码' };
-      }
+      if (!a || !password) return { ok: false, message: '请输入账号和密码' };
       if (a === 'admin' && password.length > 0) {
-        const next = { account: 'admin', displayName: '管理员' };
-        persistAdmin(next);
+        persistAdmin({ account: 'admin', displayName: '管理员' });
         return { ok: true, message: '登录成功' };
       }
       persistAdmin({ account: a, displayName: a });
@@ -415,19 +486,13 @@ const login = useCallback(
     [persistAdmin]
   );
 
-  const adminLogout = useCallback(() => {
-    persistAdmin(null);
-  }, [persistAdmin]);
+  const adminLogout = useCallback(() => persistAdmin(null), [persistAdmin]);
 
   const addToCart = useCallback(
     (product: Product, qty = 1) => {
-      if (!product.onShelf) {
-        return { ok: false, message: '商品已下架' };
-      }
+      if (!product.onShelf) return { ok: false, message: '商品已下架' };
       const nextQty = (cart.find((l) => l.product.id === product.id)?.qty ?? 0) + qty;
-      if (nextQty > product.stock) {
-        return { ok: false, message: '库存不足' };
-      }
+      if (nextQty > product.stock) return { ok: false, message: '库存不足' };
       setCart((prev) => {
         const i = prev.findIndex((l) => l.product.id === product.id);
         if (i >= 0) {
@@ -460,55 +525,86 @@ const login = useCallback(
   const clearCart = useCallback(() => setCart([]), []);
 
   const placeFoodOrder = useCallback(
-    (delivery: FoodOrder['delivery']) => {
+    async (delivery: FoodOrder['delivery'], revId?: number) => {
       if (cart.length === 0) return null;
-      const total = cart.reduce((s, l) => s + l.product.price * l.qty, 0);
-      const order: FoodOrder = {
-        id: `FO${Date.now()}`,
-        createdAt: new Date().toLocaleString('zh-CN'),
-        items: cart.map((l) => ({ ...l })),
-        total,
-        delivery,
-        status: '待支付',
-        deliveryStatus: 'none',
-      };
-      setFoodOrders((o) => [order, ...o]);
-      clearCart();
-      return order;
+      const items = cart.map((line) => ({
+        prodId: Number(line.product.id),   // 确保是数字
+        quantity: line.qty,
+      }));
+      const deliveryType = delivery === '配送至座位' ? 1 : 2;
+    
+      // 构建请求体
+      const body: any = { items, deliveryType };
+      // 只有配送至座位且 revId 是有效正整数时才添加
+      if (delivery === '配送至座位' && revId && !isNaN(revId) && revId > 0) {
+        body.revId = revId;
+      }
+    
+      try {
+        const result = await apiRequest<{ orderId: number; totalAmount: number; orderNo: string }>(
+         '/api/orders',
+          { method: 'POST', body: JSON.stringify(body) }
+        );
+        clearCart();
+        await loadOrders();
+        return { orderId: result.orderId.toString(), total: result.totalAmount };
+      } catch (err) {
+        console.error('下单失败', err);
+        return null;
+      }
     },
-    [cart, clearCart]
+    [cart, clearCart, loadOrders]
   );
 
-  const payFoodOrder = useCallback((orderId: string) => {
-    setFoodOrders((orders) =>
-      orders.map((o) => {
-        if (o.id !== orderId) return o;
-        if (o.delivery === '配送至座位') {
-          return {
-            ...o,
-            status: '已支付',
-            deliveryStatus: 'await_checkin' as DeliveryStatus,
-          };
-        }
-        return {
-          ...o,
-          status: '制作中',
-          deliveryStatus: 'pickup_ready' as DeliveryStatus,
-        };
-      })
-    );
-  }, []);
+  const payFoodOrder = useCallback(
+    async (orderId: string) => {
+      try {
+        await apiRequest(`/api/orders/${orderId}/pay`, { method: 'POST' });
+        await loadOrders();
+      } catch (err) {
+        console.error('支付失败', err);
+      }
+    },
+    [loadOrders]
+  );
 
-  const cancelFoodOrder = useCallback((orderId: string) => {
-    setFoodOrders((orders) =>
-      orders.map((o) =>
-        o.id === orderId
-          ? { ...o, status: '已取消' as OrderStatus, deliveryStatus: 'none' as DeliveryStatus }
-          : o
-      )
-    );
-  }, []);
+  const cancelFoodOrder = useCallback(
+    async (orderId: string) => {
+      try {
+        await apiRequest(`/api/orders/${orderId}/cancel`, { method: 'POST' });
+        await loadOrders();
+      } catch (err) {
+        console.error('取消订单失败', err);
+      }
+    },
+    [loadOrders]
+  );
 
+  const checkIn = useCallback(
+    async (reservationId: number) => {
+      try {
+        await apiRequest('/api/checkin', {
+          method: 'POST',
+          body: JSON.stringify({ revId: reservationId }),
+        });
+        // 打卡后刷新订单状态
+        await loadOrders();
+        // 同时更新本地预约打卡状态
+        setReservations((prev) =>
+          prev.map((r) =>
+            r.id === reservationId.toString()
+              ? { ...r, checkInAt: new Date().toLocaleString('zh-CN') }
+              : r
+          )
+        );
+      } catch (err) {
+        console.error('打卡失败', err);
+      }
+    },
+    [loadOrders]
+  );
+
+  // 以下为原有未改动的模拟函数（预约部分仍使用本地状态）
   const createReservation = useCallback(
     (r: Omit<Reservation, 'id' | 'verifyCode' | 'status'>) => {
       const res: Reservation = {
@@ -526,6 +622,18 @@ const login = useCallback(
   const payReservation = useCallback((id: string) => {
     setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '进行中' } : x)));
   }, []);
+
+  const cancelReservation = useCallback(
+    (id: string) => {
+      const r = reservations.find((x) => x.id === id);
+      if (!r) return { ok: false, message: '未找到预约' };
+      if (r.checkInAt) return { ok: false, message: '已打卡不可取消预约' };
+      if (r.status !== '待支付' && r.status !== '进行中') return { ok: false, message: '当前状态不可取消' };
+      setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '已取消' } : x)));
+      return { ok: true, message: '已取消预约' };
+    },
+    [reservations]
+  );
 
   const isHourTakenForSeat = useCallback(
     (seatCode: string, date: string, hour: number) => {
@@ -545,8 +653,7 @@ const login = useCallback(
   );
 
   const isSeatDateFullyBooked = useCallback(
-    (seatCode: string, date: string) =>
-      BOOKING_HOURS.every((h) => isHourTakenForSeat(seatCode, date, h)),
+    (seatCode: string, date: string) => BOOKING_HOURS.every((h) => isHourTakenForSeat(seatCode, date, h)),
     [isHourTakenForSeat]
   );
 
@@ -561,20 +668,6 @@ const login = useCallback(
       });
     },
     [isHourTakenForSeat]
-  );
-
-  const cancelReservation = useCallback(
-    (id: string) => {
-      const r = reservations.find((x) => x.id === id);
-      if (!r) return { ok: false, message: '未找到预约' };
-      if (r.checkInAt) return { ok: false, message: '已打卡不可取消预约' };
-      if (r.status !== '待支付' && r.status !== '进行中') {
-        return { ok: false, message: '当前状态不可取消' };
-      }
-      setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '已取消' } : x)));
-      return { ok: true, message: '已取消预约' };
-    },
-    [reservations]
   );
 
   const joinWaitlist = useCallback(
@@ -596,34 +689,6 @@ const login = useCallback(
   const cancelWaitlist = useCallback((id: string) => {
     setWaitlist((w) => w.map((x) => (x.id === id ? { ...x, status: '已取消' } : x)));
   }, []);
-
-  const bumpDeliveryAfterCheckIn = useCallback(() => {
-    setFoodOrders((orders) =>
-      orders.map((o) => {
-        if (
-          o.delivery === '配送至座位' &&
-          o.status === '已支付' &&
-          o.deliveryStatus === 'await_checkin'
-        ) {
-          return {
-            ...o,
-            status: '制作中' as OrderStatus,
-            deliveryStatus: 'making' as DeliveryStatus,
-          };
-        }
-        return o;
-      })
-    );
-  }, []);
-
-  const checkIn = useCallback(
-    (reservationId: string) => {
-      const at = new Date().toLocaleString('zh-CN');
-      setReservations((list) => list.map((x) => (x.id === reservationId ? { ...x, checkInAt: at } : x)));
-      bumpDeliveryAfterCheckIn();
-    },
-    [bumpDeliveryAfterCheckIn]
-  );
 
   const filterSeats = useCallback(
     (filters: { outlet?: boolean; lamp?: boolean; divider?: boolean; window?: boolean }) => {
@@ -658,7 +723,7 @@ const login = useCallback(
           ? {
               ...o,
               status,
-              deliveryStatus: status === '已取消' ? ('none' as DeliveryStatus) : o.deliveryStatus,
+              deliveryStatus: status === '已取消' ? 'none' : o.deliveryStatus,
             }
           : o
       )
@@ -673,10 +738,8 @@ const login = useCallback(
     setReservations((list) =>
       list.map((r) => {
         if (r.id !== id) return r;
-        if (mark === '到场') {
-          return { ...r, status: '已完成' as ReservationStatus };
-        }
-        return { ...r, status: '违约' as ReservationStatus };
+        if (mark === '到场') return { ...r, status: '已完成' };
+        return { ...r, status: '违约' };
       })
     );
   }, []);
@@ -703,12 +766,7 @@ const login = useCallback(
       setAnnouncements((list) =>
         list.map((item) =>
           item.id === id
-            ? {
-                ...item,
-                title: input.title.trim(),
-                content: input.content.trim(),
-                updatedAt: now,
-              }
+            ? { ...item, title: input.title.trim(), content: input.content.trim(), updatedAt: now }
             : item
         )
       );

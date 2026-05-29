@@ -18,7 +18,7 @@ export function Profile() {
             marginBottom: '0.85rem',
           }}
         >
-          您已累计违约 3 次，将被限制预约 7 天（演示文案）。
+          您已累计违约 3 次，将被限制预约 7 天。
         </div>
       )}
 

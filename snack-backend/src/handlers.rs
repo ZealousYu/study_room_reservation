@@ -173,48 +173,67 @@ pub async fn create_order(
     Json(order_req): Json<CreateOrderRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let user_id = claims.sub;
+    eprintln!("[create_order] start for user {}", user_id);
+
     if order_req.items.is_empty() {
+        eprintln!("[create_order] validation failed: empty items");
         return Err(AppError::BadRequest);
     }
     if order_req.deliveryType != 1 && order_req.deliveryType != 2 {
+        eprintln!("[create_order] validation failed: invalid deliveryType {}", order_req.deliveryType);
         return Err(AppError::BadRequest);
     }
     if order_req.deliveryType == 1 && order_req.revId.is_none() {
+        eprintln!("[create_order] validation failed: deliveryType=1 but revId missing");
         return Err(AppError::BadRequest);
     }
+    eprintln!("[create_order] validation passed");
 
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin().await.inspect_err(|e| eprintln!("[create_order] begin transaction error: {:?}", e))?;
+    eprintln!("[create_order] transaction started");
+
     let mut total_cents = 0;
     let mut items_info = Vec::new();
 
     for item in &order_req.items {
+        eprintln!("[create_order] checking product id={}", item.prodId);
         let prod = sqlx::query!(
             "SELECT prodId, price, stock, state FROM product WHERE prodId = ? FOR UPDATE",
             item.prodId
         )
         .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
+        .await
+        .inspect_err(|e| eprintln!("[create_order] select product failed for id={}: {:?}", item.prodId, e))?
+        .ok_or_else(|| {
+            eprintln!("[create_order] product not found: id={}", item.prodId);
+            AppError::NotFound
+        })?;
         if prod.state != 1 {
+            eprintln!("[create_order] product id={} is not on shelf", item.prodId);
             return Err(AppError::BadRequest);
         }
         if prod.stock < item.quantity {
+            eprintln!("[create_order] insufficient stock for product id={}: stock={}, request={}", item.prodId, prod.stock, item.quantity);
             return Err(AppError::InsufficientStock);
         }
         total_cents += prod.price * item.quantity;
         items_info.push((prod.prodId, item.quantity, prod.price));
+        eprintln!("[create_order] product id={} ok, price_cents={}, qty={}", item.prodId, prod.price, item.quantity);
     }
 
     for (prod_id, qty, _) in &items_info {
+        eprintln!("[create_order] updating stock for product id={}, reduce by {}", prod_id, qty);
         sqlx::query!("UPDATE product SET stock = stock - ? WHERE prodId = ?", qty, prod_id)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .inspect_err(|e| eprintln!("[create_order] update stock failed for product {}: {:?}", prod_id, e))?;
     }
 
     let now = Utc::now();
     let random_suffix: u16 = rand::thread_rng().gen_range(0..10000);
     let order_no = format!("F{}{:03}{:04}", now.format("%Y%m%d%H%M%S"), user_id, random_suffix);
     let rev_id = if order_req.deliveryType == 1 { order_req.revId } else { None };
+    eprintln!("[create_order] inserting foodorder, orderNo={}", order_no);
 
     sqlx::query!(
         "INSERT INTO foodorder (orderNo, userId, revId, totalAmount, deliveryType, status, createTime)
@@ -227,14 +246,19 @@ pub async fn create_order(
         now
     )
     .execute(&mut *tx)
-    .await?;
+    .await
+    .inspect_err(|e| eprintln!("[create_order] insert foodorder failed: {:?}", e))?;
 
+    eprintln!("[create_order] getting last insert id");
     let order_id = sqlx::query!("SELECT LAST_INSERT_ID() as id")
         .fetch_one(&mut *tx)
-        .await?
+        .await
+        .inspect_err(|e| eprintln!("[create_order] get last insert id failed: {:?}", e))?
         .id;
+    eprintln!("[create_order] got orderId={}", order_id);
 
     for (prod_id, qty, price_cents) in items_info {
+        eprintln!("[create_order] inserting orderdetail for orderId={}, prodId={}", order_id, prod_id);
         sqlx::query!(
             "INSERT INTO orderdetail (orderId, prodId, quantity, price) VALUES (?, ?, ?, ?)",
             order_id,
@@ -243,10 +267,14 @@ pub async fn create_order(
             price_cents
         )
         .execute(&mut *tx)
-        .await?;
+        .await
+        .inspect_err(|e| eprintln!("[create_order] insert orderdetail failed for prodId={}: {:?}", prod_id, e))?;
     }
 
-    tx.commit().await?;
+    eprintln!("[create_order] committing transaction");
+    tx.commit().await.inspect_err(|e| eprintln!("[create_order] commit failed: {:?}", e))?;
+    eprintln!("[create_order] order created successfully, orderId={}, orderNo={}", order_id, order_no);
+
     Ok(Json(json!({
         "orderId": order_id,
         "orderNo": order_no,
@@ -472,21 +500,18 @@ pub async fn checkin(
     Ok(StatusCode::OK)
 }
 
+// ---------- 获取我的违约记录 ----------
 pub async fn get_my_breach(
     Extension(claims): Extension<Claims>,
     State(pool): State<MySqlPool>,
 ) -> Result<Json<Vec<serde_json::Value>>, AppError> {
     let user_id = claims.sub;
-    println!("当前登录用户的 userId: {}", user_id);  // 添加日志
-
     let rows = sqlx::query!(
-        "SELECT violateTime as `violateTime`, reason FROM violation WHERE userId = ? ORDER BY violateTime DESC",
+        "SELECT violateTime, reason FROM violation WHERE userId = ? ORDER BY violateTime DESC",
         user_id
     )
     .fetch_all(&pool)
     .await?;
-    println!("查询到 {} 条违约记录", rows.len());  // 添加日志
-
     let records = rows.into_iter().map(|row| {
         json!({
             "at": row.violateTime,
