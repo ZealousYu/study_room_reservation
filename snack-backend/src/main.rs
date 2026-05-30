@@ -36,13 +36,18 @@ async fn main() -> anyhow::Result<()> {
 
     // 需要认证的路由
     let protected_routes = Router::new()
+        // 订单相关
         .route("/api/orders", post(create_order))
         .route("/api/orders", get(get_user_orders))
         .route("/api/orders/:id", get(get_order_detail))
         .route("/api/orders/:id/pay", post(pay_order))
         .route("/api/orders/:id/cancel", post(cancel_order))
         .route("/api/checkin", post(checkin))
-        .route("/api/breach", get(get_my_breach))   // 新增这一行
+        .route("/api/breach", get(get_my_breach))
+        .route("/api/reservations", get(get_user_reservations))
+        .route("/api/reservations/:id/cancel", post(cancel_reservation))
+        .route("/api/waitlist", get(get_user_waitlist))
+        .route("/api/waitlist/:id/cancel", post(cancel_waitlist))
         .layer(middleware::from_fn(auth::auth_middleware));
 
     let app = Router::new()

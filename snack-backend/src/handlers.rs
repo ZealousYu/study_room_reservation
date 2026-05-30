@@ -7,7 +7,7 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rand::Rng;
 use serde_json::json;
 use sqlx::{MySqlPool, Row};
@@ -473,7 +473,7 @@ pub async fn checkin(
 ) -> Result<StatusCode, AppError> {
     let user_id = claims.sub;
     let rev = sqlx::query!(
-        "SELECT userId FROM reservation WHERE revId = ?",
+        "SELECT userId, status FROM reservation WHERE revId = ?",
         payload.revId
     )
     .fetch_optional(&pool)
@@ -481,6 +481,16 @@ pub async fn checkin(
     .ok_or(AppError::NotFound)?;
     if rev.userId != user_id {
         return Err(AppError::Forbidden);
+    }
+    let update_result = sqlx::query!(
+        "UPDATE reservation SET status = 2, checkinTime = ? WHERE revId = ? AND status = 1",
+        Utc::now(),
+        payload.revId
+    )
+    .execute(&pool)
+    .await?;
+    if update_result.rows_affected() == 0 {
+        return Err(AppError::InvalidOrderStatus);
     }
     let order = sqlx::query!(
         "SELECT orderId FROM foodorder WHERE userId = ? AND revId = ? AND deliveryType = 1 AND status = 2",
@@ -497,6 +507,7 @@ pub async fn checkin(
         .execute(&pool)
         .await?;
     }
+
     Ok(StatusCode::OK)
 }
 
@@ -519,4 +530,181 @@ pub async fn get_my_breach(
         })
     }).collect();
     Ok(Json(records))
+}
+
+// ========== 预约相关 ==========
+// 获取当前用户的所有预约（含座位名称，合并连续时段）
+pub async fn get_user_reservations(
+    Extension(claims): Extension<Claims>,
+    State(pool): State<MySqlPool>,
+) -> Result<Json<Vec<serde_json::Value>>, AppError> {
+    let user_id = claims.sub;
+    let rows = sqlx::query!(
+        r#"
+        SELECT r.revId, r.resId, r.startTime, r.endTime, r.status, r.checkinTime,
+               r.amount as amount_cents,
+               res.name as seat_code
+        FROM reservation r
+        JOIN resource res ON r.resId = res.resId
+        WHERE r.userId = ?
+        ORDER BY r.startTime DESC
+        "#,
+        user_id
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let start: DateTime<Utc> = row.startTime.and_utc();
+        let end: DateTime<Utc> = row.endTime.and_utc();
+        let date = start.format("%Y-%m-%d").to_string();
+
+        // 合并连续整点时段：直接取 start 和 end 的小时部分
+        let start_hour = start.format("%H").to_string();
+        let end_hour = end.format("%H").to_string();
+        let slots = vec![format!("{}:00-{}:00", start_hour, end_hour)];
+
+        let status_str = match row.status {
+            0 => "待支付",
+            1 => "预约成功",
+            2 => "进行中",
+            3 => "已取消",
+            4 => "违约",
+            5 => "已完成",
+            _ => "待支付",
+        };
+        let fee_yuan = row.amount_cents;
+        result.push(json!({
+            "id": row.revId.to_string(),
+            "seatCode": row.seat_code,
+            "date": date,
+            "slots": slots,
+            "status": status_str,
+            "fee": fee_yuan,
+            "checkInAt": row.checkinTime.map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string()),
+            "verifyCode": format!("{:X}", (row.revId as u64) % 0xFFFFFFFF),
+        }));
+    }
+    Ok(Json(result))
+}
+
+// 取消预约
+pub async fn cancel_reservation(
+    Path(rev_id): Path<i32>,
+    Extension(claims): Extension<Claims>,
+    State(pool): State<MySqlPool>,
+) -> Result<StatusCode, AppError> {
+    let user_id = claims.sub;
+    let rev = sqlx::query!(
+        "SELECT userId, status, startTime FROM reservation WHERE revId = ?",
+        rev_id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if rev.userId != user_id {
+        return Err(AppError::Forbidden);
+    }
+    if rev.status != 0 && rev.status != 1 {
+        return Err(AppError::InvalidOrderStatus);
+    }
+    // 检查取消截止时间（调用 MySQL 函数 can_cancel_reservation）
+    let can = sqlx::query!("SELECT can_cancel_reservation(?) as can", rev_id)
+        .fetch_one(&pool)
+        .await?
+        .can
+        .unwrap_or(0);
+    if can == 0 {
+        return Err(AppError::BadRequest);
+    }
+    sqlx::query!(
+        "UPDATE reservation SET status = 3, cancelTime = ? WHERE revId = ?",
+        Utc::now(),
+        rev_id
+    )
+    .execute(&pool)
+    .await?;
+    Ok(StatusCode::OK)
+}
+
+// ========== 候补相关 ==========
+// 获取当前用户的候补记录（合并连续时段）
+pub async fn get_user_waitlist(
+    Extension(claims): Extension<Claims>,
+    State(pool): State<MySqlPool>,
+) -> Result<Json<Vec<serde_json::Value>>, AppError> {
+    let user_id = claims.sub;
+    let rows = sqlx::query!(
+        r#"
+        SELECT w.waitId, w.startTime, w.endTime, w.createTime, w.status,
+               res.name as seat_code
+        FROM waitlist w
+        JOIN resource res ON w.resId = res.resId
+        WHERE w.userId = ? AND w.status != 3
+        ORDER BY w.createTime DESC
+        "#,
+        user_id
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        let start: DateTime<Utc> = row.startTime.and_utc();
+        let end: DateTime<Utc> = row.endTime.and_utc();
+        let date = start.format("%Y-%m-%d").to_string();
+
+        // 合并连续时段
+        let start_hour = start.format("%H").to_string();
+        let end_hour = end.format("%H").to_string();
+        let slots = vec![format!("{}:00-{}:00", start_hour, end_hour)];
+
+        let status_str = match row.status {
+            1 => "排队中",
+            2 => "已转正",
+            3 => "已取消",
+            4 => "未成功",
+            _ => "排队中",
+        };
+        result.push(json!({
+            "id": row.waitId.to_string(),
+            "seatCode": row.seat_code,
+            "date": date,
+            "slots": slots,
+            "status": status_str,
+            "createdAt": row.createTime.format("%Y/%m/%d %H:%M:%S").to_string(),
+        }));
+    }
+    Ok(Json(result))
+}
+
+// 取消候补
+pub async fn cancel_waitlist(
+    Path(wait_id): Path<i32>,
+    Extension(claims): Extension<Claims>,
+    State(pool): State<MySqlPool>,
+) -> Result<StatusCode, AppError> {
+    let user_id = claims.sub;
+    let w = sqlx::query!(
+        "SELECT userId, status FROM waitlist WHERE waitId = ?",
+        wait_id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if w.userId != user_id {
+        return Err(AppError::Forbidden);
+    }
+    if w.status != 1 {
+        return Err(AppError::InvalidOrderStatus);
+    }
+    sqlx::query!(
+        "UPDATE waitlist SET status = 3, cancelTime = ? WHERE waitId = ?",
+        Utc::now(),
+        wait_id
+    )
+    .execute(&pool)
+    .await?;
+    Ok(StatusCode::OK)
 }

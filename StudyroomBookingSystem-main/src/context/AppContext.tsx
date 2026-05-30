@@ -21,10 +21,10 @@ export type Seat = {
   enabled: boolean;
 };
 
-export type ReservationStatus = '待支付' | '进行中' | '已完成' | '已取消' | '违约';
+export type ReservationStatus = '待支付' | '预约成功' | '进行中' | '已取消' | '违约'| '已完成' ;
 
 export type Reservation = {
-  id: string;          // 前端使用字符串，实际对应后端的 revId (number)
+  id: string;
   seatCode: string;
   date: string;
   slots: string[];
@@ -45,7 +45,7 @@ export type Product = {
   rating: number;
   stock: number;
   onShelf: boolean;
-  picture?: string;     // 新增图片字段
+  picture?: string;
 };
 
 export type CartLine = { product: Product; qty: number };
@@ -63,8 +63,8 @@ export type DeliveryStatus =
   | 'completed';
 
 export type FoodOrder = {
-  id: string;           // 实际为 orderId 数字转字符串
-  orderNo: string;      // 订单号，用于前端展示
+  id: string;
+  orderNo: string;
   createdAt: string;
   items: { product: { id: string; name: string; price: number }; qty: number }[];
   total: number;
@@ -128,7 +128,6 @@ const SEED_SEATS: Omit<Seat, 'enabled'>[] = [
   { id: 's6', code: 'C-02', zone: '吧台区', hasOutlet: true, hasLamp: true, hasDivider: false, nearWindow: false },
 ];
 
-// 后端数字分类映射
 function mapCategory(categoryNum: number): ProductCategory {
   switch (categoryNum) {
     case 1: return '咖啡';
@@ -139,7 +138,6 @@ function mapCategory(categoryNum: number): ProductCategory {
   }
 }
 
-// 后端订单状态映射
 function mapOrderStatus(statusNum: number): OrderStatus {
   switch (statusNum) {
     case 1: return '待支付';
@@ -151,7 +149,6 @@ function mapOrderStatus(statusNum: number): OrderStatus {
   }
 }
 
-// 根据订单状态和配送方式推导 deliveryStatus（前端展示用）
 function deriveDeliveryStatus(order: { status: OrderStatus; delivery: '配送至座位' | '吧台自取' }): DeliveryStatus {
   if (order.status === '待支付') return 'none';
   if (order.status === '已取消') return 'none';
@@ -160,7 +157,6 @@ function deriveDeliveryStatus(order: { status: OrderStatus; delivery: '配送至
     if (order.status === '制作中') return 'pickup_ready';
     return 'pickup_ready';
   } else {
-    // 配送至座位
     if (order.status === '已支付') return 'await_checkin';
     if (order.status === '制作中') return 'making';
     if (order.status === '已完成') return 'completed';
@@ -247,7 +243,7 @@ type AppContextValue = {
   cancelFoodOrder: (orderId: string) => Promise<void>;
   createReservation: (r: Omit<Reservation, 'id' | 'verifyCode' | 'status'>) => Reservation;
   payReservation: (id: string) => void;
-  cancelReservation: (id: string) => { ok: boolean; message: string };
+  cancelReservation: (id: string) => Promise<{ ok: boolean; message: string }>;
   checkIn: (reservationId: number) => Promise<void>;
   filterSeats: (filters: {
     outlet?: boolean;
@@ -260,7 +256,7 @@ type AppContextValue = {
   canBookSlots: (seatCode: string, date: string, slotLabels: string[]) => boolean;
   waitlist: WaitlistEntry[];
   joinWaitlist: (p: { seatCode: string; date: string; slots: string[] }) => WaitlistEntry;
-  cancelWaitlist: (id: string) => void;
+  cancelWaitlist: (id: string) => Promise<void>;
   setSeatEnabled: (seatId: string, enabled: boolean) => void;
   setProductStock: (productId: string, stock: number) => void;
   setProductOnShelf: (productId: string, onShelf: boolean) => void;
@@ -325,7 +321,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [breachRecords, setBreachRecords] = useState<BreachRecord[]>([]);
   const breachCount = breachRecords.length;
 
-  // 加载订单列表
+  // ---------- 数据加载函数 ----------
   const loadOrders = useCallback(async (token?: string) => {
     const t = token || localStorage.getItem(TOKEN_KEY);
     if (!t) return;
@@ -333,7 +329,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = await apiRequest<any[]>('/api/orders');
       const converted: FoodOrder[] = data.map(order => ({
         id: order.orderId.toString(),
-        orderNo: order.orderNo,        
+        orderNo: order.orderNo,
         createdAt: order.createTime,
         items: order.items.map((item: any) => ({
           product: {
@@ -357,6 +353,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const loadReservations = useCallback(async (token?: string) => {
+    const t = token || localStorage.getItem(TOKEN_KEY);
+    if (!t) return;
+    try {
+      const data = await apiRequest<any[]>('/api/reservations');
+      setReservations(data);
+    } catch (err) {
+      console.error('加载预约列表失败', err);
+    }
+  }, []);
+
+  const loadWaitlist = useCallback(async (token?: string) => {
+    const t = token || localStorage.getItem(TOKEN_KEY);
+    if (!t) return;
+    try {
+      const data = await apiRequest<any[]>('/api/waitlist');
+      setWaitlist(data);
+    } catch (err) {
+      console.error('加载候补列表失败', err);
+    }
+  }, []);
+
+  const loadBreach = useCallback(async (token?: string) => {
+    const t = token || localStorage.getItem(TOKEN_KEY);
+    if (!t) return;
+    try {
+      const data = await apiRequest<any[]>('/api/breach');
+      const records: BreachRecord[] = data.map((item, idx) => ({
+        id: idx.toString(),
+        at: item.at,
+        reason: item.reason,
+      }));
+      setBreachRecords(records);
+    } catch (err) {
+      console.error('加载违约记录失败', err);
+    }
+  }, []);
+
+  // 自动恢复登录状态并加载数据
+  useEffect(() => {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const savedUser = localStorage.getItem(STORAGE_KEY);
+    if (token && savedUser) {
+      try {
+        const userData = JSON.parse(savedUser);
+        setUser(userData);
+        loadOrders(token);
+        loadReservations(token);
+        loadWaitlist(token);
+        loadBreach(token);
+      } catch (err) {
+        console.error('恢复登录失败', err);
+      }
+    }
+  }, [loadOrders, loadReservations, loadWaitlist, loadBreach]);
+
   // 获取商品列表
   useEffect(() => {
     fetch('http://localhost:8080/api/products')
@@ -378,21 +430,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch((err) => console.error('获取商品失败', err));
   }, []);
 
-  // 自动恢复登录状态并加载订单
-  useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const savedUser = localStorage.getItem(STORAGE_KEY);
-    if (token && savedUser) {
-      try {
-        const userData = JSON.parse(savedUser);
-        setUser(userData);
-        loadOrders(token);
-      } catch (err) {
-        console.error('恢复登录失败', err);
-      }
-    }
-  }, [loadOrders]);
-
+  // ---------- 用户认证 ----------
   const persistUser = useCallback((u: User | null) => {
     if (u) localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
     else localStorage.removeItem(STORAGE_KEY);
@@ -422,6 +460,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const userName = data.user.realName || `同学${phone.slice(-4)}`;
           persistUser({ phone: data.user.phone, name: userName });
           await loadOrders(data.token);
+          await loadReservations(data.token);
+          await loadWaitlist(data.token);
+          await loadBreach(data.token);
           return { ok: true, message: '登录成功' };
         } else {
           return { ok: false, message: data.error || '登录失败' };
@@ -431,7 +472,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { ok: false, message: '网络错误，请稍后重试' };
       }
     },
-    [persistUser, loadOrders]
+    [persistUser, loadOrders, loadReservations, loadWaitlist, loadBreach]
   );
 
   const register = useCallback(
@@ -453,6 +494,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           localStorage.setItem(TOKEN_KEY, data.token);
           persistUser({ phone: data.user.phone, name: data.user.realName });
           await loadOrders(data.token);
+          await loadReservations(data.token);
+          await loadWaitlist(data.token);
+          await loadBreach(data.token);
           return { ok: true, message: '注册成功' };
         } else {
           return { ok: false, message: data.error || '注册失败' };
@@ -461,7 +505,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { ok: false, message: '网络错误' };
       }
     },
-    [persistUser, loadOrders]
+    [persistUser, loadOrders, loadReservations, loadWaitlist, loadBreach]
   );
 
   const logout = useCallback(() => {
@@ -470,6 +514,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCart([]);
     setFoodOrders([]);
     setBreachRecords([]);
+    setReservations([]);
+    setWaitlist([]);
   }, [persistUser]);
 
   const adminLogin = useCallback(
@@ -488,6 +534,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const adminLogout = useCallback(() => persistAdmin(null), [persistAdmin]);
 
+  // ---------- 购物车 ----------
   const addToCart = useCallback(
     (product: Product, qty = 1) => {
       if (!product.onShelf) return { ok: false, message: '商品已下架' };
@@ -528,21 +575,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (delivery: FoodOrder['delivery'], revId?: number) => {
       if (cart.length === 0) return null;
       const items = cart.map((line) => ({
-        prodId: Number(line.product.id),   // 确保是数字
+        prodId: Number(line.product.id),
         quantity: line.qty,
       }));
       const deliveryType = delivery === '配送至座位' ? 1 : 2;
-    
-      // 构建请求体
       const body: any = { items, deliveryType };
-      // 只有配送至座位且 revId 是有效正整数时才添加
       if (delivery === '配送至座位' && revId && !isNaN(revId) && revId > 0) {
         body.revId = revId;
       }
-    
       try {
         const result = await apiRequest<{ orderId: number; totalAmount: number; orderNo: string }>(
-         '/api/orders',
+          '/api/orders',
           { method: 'POST', body: JSON.stringify(body) }
         );
         clearCart();
@@ -587,9 +630,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           method: 'POST',
           body: JSON.stringify({ revId: reservationId }),
         });
-        // 打卡后刷新订单状态
         await loadOrders();
-        // 同时更新本地预约打卡状态
         setReservations((prev) =>
           prev.map((r) =>
             r.id === reservationId.toString()
@@ -604,7 +645,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadOrders]
   );
 
-  // 以下为原有未改动的模拟函数（预约部分仍使用本地状态）
+  // ---------- 预约与候补（模拟创建，真实取消）----------
   const createReservation = useCallback(
     (r: Omit<Reservation, 'id' | 'verifyCode' | 'status'>) => {
       const res: Reservation = {
@@ -624,17 +665,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const cancelReservation = useCallback(
-    (id: string) => {
-      const r = reservations.find((x) => x.id === id);
-      if (!r) return { ok: false, message: '未找到预约' };
-      if (r.checkInAt) return { ok: false, message: '已打卡不可取消预约' };
-      if (r.status !== '待支付' && r.status !== '进行中') return { ok: false, message: '当前状态不可取消' };
-      setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '已取消' } : x)));
-      return { ok: true, message: '已取消预约' };
+    async (id: string) => {
+      try {
+        await apiRequest(`/api/reservations/${id}/cancel`, { method: 'POST' });
+        setReservations((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, status: '已取消' } : r))
+        );
+        //await loadReservations();
+        return { ok: true, message: '已取消预约' };
+      } catch (err: any) {
+        console.error('取消预约失败', err);
+        return { ok: false, message: err.message || '取消失败' };
+      }
     },
-    [reservations]
+    []
   );
 
+  const joinWaitlist = useCallback(
+    (p: { seatCode: string; date: string; slots: string[] }) => {
+      const entry: WaitlistEntry = {
+        id: `WL${Date.now()}`,
+        seatCode: p.seatCode,
+        date: p.date,
+        slots: [...p.slots],
+        status: '排队中',
+        createdAt: new Date().toLocaleString('zh-CN'),
+      };
+      setWaitlist((w) => [entry, ...w]);
+      return entry;
+    },
+    []
+  );
+
+  const cancelWaitlist = useCallback(
+    async (id: string) => {
+      try {
+        await apiRequest(`/api/waitlist/${id}/cancel`, { method: 'POST' });
+        setWaitlist((prev) => prev.filter((w) => w.id !== id));
+        //await loadWaitlist();
+      } catch (err) {
+        console.error('取消候补失败', err);
+      }
+    },
+    []
+  );
+
+  // ---------- 座位筛选与时间判断（模拟）----------
   const isHourTakenForSeat = useCallback(
     (seatCode: string, date: string, hour: number) => {
       const label = hourSlotLabel(hour);
@@ -670,26 +746,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [isHourTakenForSeat]
   );
 
-  const joinWaitlist = useCallback(
-    (p: { seatCode: string; date: string; slots: string[] }) => {
-      const entry: WaitlistEntry = {
-        id: `WL${Date.now()}`,
-        seatCode: p.seatCode,
-        date: p.date,
-        slots: [...p.slots],
-        status: '排队中',
-        createdAt: new Date().toLocaleString('zh-CN'),
-      };
-      setWaitlist((w) => [entry, ...w]);
-      return entry;
-    },
-    []
-  );
-
-  const cancelWaitlist = useCallback((id: string) => {
-    setWaitlist((w) => w.map((x) => (x.id === id ? { ...x, status: '已取消' } : x)));
-  }, []);
-
   const filterSeats = useCallback(
     (filters: { outlet?: boolean; lamp?: boolean; divider?: boolean; window?: boolean }) => {
       return seats.filter((s) => {
@@ -704,6 +760,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [seats]
   );
 
+  // ---------- 管理员功能（模拟）----------
   const setSeatEnabled = useCallback((seatId: string, enabled: boolean) => {
     setSeats((list) => list.map((s) => (s.id === seatId ? { ...s, enabled } : s)));
   }, []);

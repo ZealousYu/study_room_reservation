@@ -6,11 +6,10 @@ export function Reservations() {
   const { reservations, cancelReservation, waitlist, cancelWaitlist } = useApp();
   const [toast, setToast] = useState<string | null>(null);
 
-  function cancel(id: string) {
-    const r = cancelReservation(id);
+  async function cancel(id: string) {
+    const r = await cancelReservation(id);
     setToast(r.message);
   }
-
   return (
     <>
       <h1 className="page-title">我的预约</h1>
@@ -52,7 +51,7 @@ export function Reservations() {
                 核销码：<code>{r.verifyCode}</code>
               </div>
             )}
-            {(r.status === '待支付' || r.status === '进行中') && !r.checkInAt && (
+            {(r.status === '待支付' || r.status === '预约成功') && !r.checkInAt && (
               <button
                 type="button"
                 className="btn btn-ghost"
@@ -64,7 +63,7 @@ export function Reservations() {
             )}
             {(r.status === '待支付' || r.status === '进行中') && r.checkInAt && (
               <p style={{ marginTop: '0.65rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                已打卡，不可取消预约
+                已打卡
               </p>
             )}
           </div>
