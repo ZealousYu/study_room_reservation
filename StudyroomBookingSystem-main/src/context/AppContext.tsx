@@ -8,6 +8,28 @@ import {
   type ReactNode,
 } from 'react';
 
+export function mapReservationStatus(status: number): ReservationStatus {
+  switch (status) {
+    case 1: return '待支付';
+    case 2: return '进行中';
+    case 3: return '已完成';
+    case 0: return '已取消';
+    case 4: return '违约';
+    default: return '待支付';
+  }
+}
+
+export function mapOrderStatus(status: number): OrderStatus {
+  switch (status) {
+    case 1: return '待支付';
+    case 2: return '已支付';
+    case 3: return '制作中';
+    case 4: return '已完成';
+    case 5: return '已取消';
+    default: return '待支付';
+  }
+}
+
 export type Zone = '靠窗区' | '静音区' | '吧台区';
 
 export type Seat = {
@@ -231,6 +253,7 @@ type AppContextValue = {
   breachCount: number;
   login: (phone: string, password: string) => Promise<{ ok: boolean; message: string }>;
   register: (phone: string, password: string) => Promise<{ ok: boolean; message: string }>;
+  resetPassword: (phone: string, code: string, newPassword: string) => Promise<{ ok: boolean; message: string }>;
   logout: () => void;
   adminLogin: (account: string, password: string) => { ok: boolean; message: string };
   adminLogout: () => void;
@@ -448,6 +471,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!/^1[3-9]\d{9}$/.test(phone)) {
         return { ok: false, message: '请输入有效的 11 位手机号' };
       }
+      if (password.length < 1) {
+        return { ok: false, message: '请输入密码' };
+      }
       try {
         const res = await fetch('http://localhost:8080/api/auth/login', {
           method: 'POST',
@@ -465,7 +491,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           await loadBreach(data.token);
           return { ok: true, message: '登录成功' };
         } else {
-          return { ok: false, message: data.error || '登录失败' };
+          return { ok: false, message: data.error || '登录失败，请检查账号或密码' };
         }
       } catch (err) {
         console.error('登录错误', err);
@@ -480,9 +506,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!/^1[3-9]\d{9}$/.test(phone)) {
         return { ok: false, message: '请输入有效的 11 位手机号' };
       }
-      if (!/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,16}$/.test(password)) {
-        return { ok: false, message: '密码需为 8–16 位字母与数字组合' };
+      if (password.length < 6) {
+        return { ok: false, message: '密码至少 6 位' };
       }
+
       try {
         const res = await fetch('http://localhost:8080/api/auth/register', {
           method: 'POST',
@@ -506,6 +533,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     },
     [persistUser, loadOrders, loadReservations, loadWaitlist, loadBreach]
+  );
+
+  const resetPassword = useCallback(
+    async (phone: string, code: string, newPassword: string) => {
+      if (newPassword.length < 8) {
+        return { ok: false, message: '密码至少 8 位' };
+      }
+
+      try {
+        const res = await fetch('http://localhost:8080/api/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            code,
+            new_password: newPassword,
+          }),
+        });
+
+        const data = await res.json();
+        return { ok: res.ok, message: data.message || '密码重置成功' };
+      } catch {
+        return { ok: false, message: '网络错误' };
+      }
+    },
+    []
   );
 
   const logout = useCallback(() => {
@@ -651,7 +704,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const res: Reservation = {
         ...r,
         id: `RV${Date.now()}`,
-        status: '待支付',
+        status: mapReservationStatus(1),
         verifyCode: Math.random().toString(36).slice(2, 10).toUpperCase(),
       };
       setReservations((list) => [res, ...list]);
@@ -661,7 +714,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const payReservation = useCallback((id: string) => {
-    setReservations((list) => list.map((x) => (x.id === id ? { ...x, status: '进行中' } : x)));
+    setReservations((list) => list.map((x) =>
+      x.id === id ? { ...x, status: mapReservationStatus(2) } : x
+    ));
   }, []);
 
   const cancelReservation = useCallback(
@@ -671,14 +726,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setReservations((prev) =>
           prev.map((r) => (r.id === id ? { ...r, status: '已取消' } : r))
         );
-        //await loadReservations();
+        await loadReservations();
         return { ok: true, message: '已取消预约' };
       } catch (err: any) {
         console.error('取消预约失败', err);
         return { ok: false, message: err.message || '取消失败' };
       }
     },
-    []
+    [loadReservations]
   );
 
   const joinWaitlist = useCallback(
@@ -778,10 +833,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       orders.map((o) =>
         o.id === orderId
           ? {
-              ...o,
-              status,
-              deliveryStatus: status === '已取消' ? 'none' : o.deliveryStatus,
-            }
+            ...o,
+            status,
+            deliveryStatus: status === '已取消' ? ('none' as DeliveryStatus) : o.deliveryStatus,
+          }
           : o
       )
     );
@@ -795,8 +850,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setReservations((list) =>
       list.map((r) => {
         if (r.id !== id) return r;
-        if (mark === '到场') return { ...r, status: '已完成' };
-        return { ...r, status: '违约' };
+        if (mark === '到场') {
+          return { ...r, status: mapReservationStatus(3) };
+        }
+        return { ...r, status: mapReservationStatus(4) };
       })
     );
   }, []);
@@ -823,7 +880,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAnnouncements((list) =>
         list.map((item) =>
           item.id === id
-            ? { ...item, title: input.title.trim(), content: input.content.trim(), updatedAt: now }
+            ? {
+              ...item,
+              title: input.title.trim(),
+              content: input.content.trim(),
+              updatedAt: now,
+            }
             : item
         )
       );
@@ -849,6 +911,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       breachCount,
       login,
       register,
+      resetPassword,
       logout,
       adminLogin,
       adminLogout,
@@ -894,6 +957,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       breachCount,
       login,
       register,
+      resetPassword,
       logout,
       adminLogin,
       adminLogout,

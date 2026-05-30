@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let public_routes = Router::new()
         .route("/api/auth/register", post(register))
         .route("/api/auth/login", post(login))
+        .route("/api/reset-password", post(reset_password))
         .route("/api/products", get(get_products))
         .route("/api/products/:id", get(get_product));
 
