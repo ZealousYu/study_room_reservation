@@ -1,0 +1,140 @@
+DROP PROCEDURE IF EXISTS generate_foodorders_from_reservations;
+
+DELIMITER $$
+
+CREATE PROCEDURE generate_foodorders_from_reservations(
+    IN p_order_count INT,           -- 想要生成的订单数量
+    IN p_start_date DATE,           -- 预约起始日期
+    IN p_end_date DATE              -- 预约结束日期
+)
+BEGIN
+    DECLARE i INT DEFAULT 0;
+    DECLARE v_revId INT;
+    DECLARE v_userId INT;
+    DECLARE v_order_date DATE;
+    DECLARE v_startTime DATETIME;
+    DECLARE v_endTime DATETIME;
+    DECLARE v_createTime DATETIME;
+    DECLARE v_payTime DATETIME;
+    DECLARE v_cancelTime DATETIME;
+    DECLARE v_status INT;
+    DECLARE v_deliveryType INT;
+    DECLARE v_orderNo VARCHAR(20);
+    DECLARE v_totalAmount DECIMAL(10,2);
+    DECLARE v_new_orderId INT;
+    DECLARE v_detail_count INT;
+    DECLARE v_prodId INT;
+    DECLARE v_quantity INT;
+    DECLARE v_price DECIMAL(10,2);
+    DECLARE v_hour INT;
+    DECLARE v_minute INT;
+    DECLARE v_second INT;
+    DECLARE v_rand_val DECIMAL(5,4);
+
+    -- 临时表：存储符合条件的预约记录（随机排序）
+    DROP TEMPORARY TABLE IF EXISTS tmp_valid_reservations;
+    CREATE TEMPORARY TABLE tmp_valid_reservations AS
+    SELECT revId, userId, DATE(startTime) AS order_date, startTime, endTime
+    FROM reservation
+    WHERE DATE(startTime) BETWEEN p_start_date AND p_end_date
+      AND status IN (1, 4)     -- 只选择“预约成功”或“已完成”的（已完成表示真实发生过）
+    ORDER BY RAND();
+
+    -- 如果预约数量不足，按实际数量生成
+    IF (SELECT COUNT(*) FROM tmp_valid_reservations) < p_order_count THEN
+        SET p_order_count = (SELECT COUNT(*) FROM tmp_valid_reservations);
+    END IF;
+
+    -- 循环生成订单
+    WHILE i < p_order_count DO
+        -- 从临时表中取一条预约记录（按随机顺序）
+        SELECT revId, userId, order_date, startTime, endTime
+        INTO v_revId, v_userId, v_order_date, v_startTime, v_endTime
+        FROM tmp_valid_reservations
+        LIMIT 9 OFFSET i;
+
+        -- 随机配送方式（1=配送至座位，2=自取）
+        SET v_deliveryType = IF(RAND() < 0.6, 1, 2);
+
+        -- 订单状态分布（12% 取消，其余四种各22%）
+        SET v_rand_val = RAND();
+        IF v_rand_val < 0.12 THEN
+            SET v_status = 5;      -- 已取消
+        ELSEIF v_rand_val < 0.34 THEN
+            SET v_status = 1;      -- 待支付
+        ELSEIF v_rand_val < 0.56 THEN
+            SET v_status = 2;      -- 已支付
+        ELSEIF v_rand_val < 0.78 THEN
+            SET v_status = 3;      -- 制作中
+        ELSE
+            SET v_status = 4;      -- 已完成
+        END IF;
+
+        -- 生成创建时间（在预约当天的 07:00~22:00 之间）
+        SET v_hour = 7 + FLOOR(RAND() * 16);
+        SET v_minute = FLOOR(RAND() * 60);
+        SET v_second = FLOOR(RAND() * 60);
+        SET v_createTime = TIMESTAMP(v_order_date, MAKETIME(v_hour, v_minute, v_second));
+
+        -- 根据状态生成支付时间或取消时间
+        SET v_payTime = NULL;
+        SET v_cancelTime = NULL;
+
+        IF v_status IN (2, 3, 4) THEN
+            -- 支付时间在创建后 1~15 分钟之间，且不跨天
+            SET v_payTime = DATE_ADD(v_createTime, INTERVAL 1 + FLOOR(RAND() * 14) MINUTE);
+            IF DATE(v_payTime) > v_order_date THEN
+                SET v_payTime = CONCAT(v_order_date, ' 23:59:59');
+            END IF;
+        ELSEIF v_status = 5 THEN
+            -- 取消时间在创建后 1~120 分钟之间，且不跨天
+            SET v_cancelTime = DATE_ADD(v_createTime, INTERVAL 1 + FLOOR(RAND() * 120) MINUTE);
+            IF DATE(v_cancelTime) > v_order_date THEN
+                SET v_cancelTime = CONCAT(v_order_date, ' 23:59:59');
+            END IF;
+        END IF;
+
+        -- 生成唯一订单号（F + yyyyMMddHHmm + userId(3位) + 随机3位）
+        SET v_orderNo = CONCAT(
+            'F', DATE_FORMAT(v_createTime, '%Y%m%d%H%i'),
+            LPAD(v_userId, 3, '0'),
+            LPAD(FLOOR(RAND() * 1000), 3, '0')
+        );
+
+        -- 插入订单（总金额先为0，后面更新）
+        INSERT INTO foodorder (
+            orderNo, userId, revId, totalAmount, deliveryType,
+            status, createTime, payTime, cancelTime
+        ) VALUES (
+            v_orderNo, v_userId, v_revId, 0.00, v_deliveryType,
+            v_status, v_createTime, v_payTime, v_cancelTime
+        );
+        SET v_new_orderId = LAST_INSERT_ID();
+
+        -- 生成订单明细（1~4种商品）
+        SET v_detail_count = 1 + FLOOR(RAND() * 4);
+        SET v_totalAmount = 0.00;
+
+        START TRANSACTION;
+        WHILE v_detail_count > 0 DO
+            -- 随机选择一个上架商品
+            SELECT prodId, price INTO v_prodId, v_price
+            FROM product WHERE state = 1 ORDER BY RAND() LIMIT 1;
+            SET v_quantity = 1 + FLOOR(RAND() * 3);
+            INSERT INTO orderdetail (orderId, prodId, quantity, price)
+            VALUES (v_new_orderId, v_prodId, v_quantity, v_price);
+            SET v_totalAmount = v_totalAmount + (v_price * v_quantity);
+            SET v_detail_count = v_detail_count - 1;
+        END WHILE;
+
+        -- 更新订单总金额
+        UPDATE foodorder SET totalAmount = v_totalAmount WHERE orderId = v_new_orderId;
+        COMMIT;
+
+        SET i = i + 1;
+    END WHILE;
+
+    DROP TEMPORARY TABLE tmp_valid_reservations;
+END$$
+
+DELIMITER ;

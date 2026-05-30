@@ -1,0 +1,142 @@
+DROP PROCEDURE IF EXISTS generate_sample_reservations;
+
+DELIMITER $$
+
+CREATE PROCEDURE generate_sample_reservations(IN p_base_date DATE)
+BEGIN
+    DECLARE i INT DEFAULT 1;
+    DECLARE v_userId INT;
+    DECLARE v_resId INT;
+    DECLARE v_startDate DATE;
+    DECLARE v_startHour INT;
+    DECLARE v_duration INT;
+    DECLARE v_startTime DATETIME;
+    DECLARE v_endTime DATETIME;
+    DECLARE v_status INT;
+    DECLARE v_createTime DATETIME;
+    DECLARE v_cancelTime DATETIME;
+    DECLARE v_checkinTime DATETIME;
+    DECLARE v_amount INT;
+    DECLARE v_days_back INT;
+    DECLARE v_new_revId INT;
+
+    IF p_base_date IS NULL THEN
+        SET p_base_date = CURDATE();
+    END IF;
+
+    WHILE i <= 60 DO
+        -- 随机用户（普通用户 1~13）
+        SET v_userId = ELT(1 + FLOOR(RAND() * 13), 1,2,3,4,5,6,7,8,9,10,11,12,13);
+        -- 随机座位（1~38）
+        SET v_resId = ELT(1 + FLOOR(RAND() * 38), 
+            1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38);
+
+        -- 状态分布（符合新定义）
+        IF i <= 6 THEN                 -- 10% 待支付 (0)
+            SET v_status = 0;
+        ELSEIF i <= 15 THEN            -- 15% 预约成功 (1)
+            SET v_status = 1;
+        ELSEIF i <= 21 THEN            -- 10% 进行中 (2)
+            SET v_status = 2;
+        ELSEIF i <= 30 THEN            -- 15% 已取消 (3)
+            SET v_status = 3;
+        ELSEIF i <= 36 THEN            -- 10% 违约 (4)
+            SET v_status = 4;
+        ELSE                           -- 40% 已完成 (5)
+            SET v_status = 5;
+        END IF;
+
+        -- 根据状态决定预约日期（未来/过去）
+        IF v_status = 0 OR v_status = 1 THEN
+            -- 待支付 和 预约成功 → 未来日期
+            SET v_startDate = DATE_ADD(p_base_date, INTERVAL FLOOR(RAND() * 7) DAY);
+            SET v_startHour = 6 + FLOOR(RAND() * 17);
+            SET v_duration = 1 + FLOOR(RAND() * 17);
+            IF v_startHour + v_duration > 23 THEN
+                SET v_duration = 23 - v_startHour;
+            END IF;
+        ELSE
+            -- 进行中 / 已取消 / 违约 / 已完成 → 过去日期
+            SET v_days_back = 1 + FLOOR(RAND() * 30);
+            SET v_startDate = DATE_SUB(p_base_date, INTERVAL v_days_back DAY);
+            SET v_startHour = 6 + FLOOR(RAND() * 17);
+            SET v_duration = 1 + FLOOR(RAND() * 17);
+            IF v_startHour + v_duration > 23 THEN
+                SET v_duration = 23 - v_startHour;
+            END IF;
+        END IF;
+
+        SET v_startTime = CONCAT(v_startDate, ' ', LPAD(v_startHour, 2, '0'), ':00:00');
+        SET v_endTime = DATE_ADD(v_startTime, INTERVAL v_duration HOUR);
+
+        -- 创建时间（在开始时间之前若干天）
+        IF v_status = 0 OR v_status = 1 THEN
+            SET v_createTime = DATE_SUB(v_startTime, INTERVAL (1 + FLOOR(RAND() * 7)) DAY);
+            IF v_createTime < DATE_SUB(p_base_date, INTERVAL 30 DAY) THEN
+                SET v_createTime = DATE_SUB(p_base_date, INTERVAL 30 DAY);
+                SET v_createTime = CONCAT(CAST(v_createTime AS DATE), ' 00:00:00');
+            END IF;
+        ELSE
+            SET v_createTime = DATE_SUB(v_startTime, INTERVAL FLOOR(RAND() * 6) DAY);
+            IF v_createTime < DATE_SUB(p_base_date, INTERVAL 30 DAY) THEN
+                SET v_createTime = DATE_SUB(p_base_date, INTERVAL 30 DAY);
+                SET v_createTime = CONCAT(CAST(v_createTime AS DATE), ' 00:00:00');
+            END IF;
+        END IF;
+
+        -- 随机时间部分
+        SET v_createTime = CONCAT(CAST(v_createTime AS DATE), ' ',
+            LPAD(FLOOR(RAND() * 24), 2, '0'), ':',
+            LPAD(FLOOR(RAND() * 60), 2, '0'), ':',
+            LPAD(FLOOR(RAND() * 60), 2, '0'));
+
+        -- 取消时间和打卡时间初始为 NULL
+        SET v_cancelTime = NULL;
+        SET v_checkinTime = NULL;
+
+        -- 已取消的预约：设置取消时间（开始日期前一天 17:xx）
+        IF v_status = 3 THEN
+            SET v_cancelTime = DATE_SUB(DATE(v_startTime), INTERVAL 1 DAY);
+            SET v_cancelTime = CONCAT(CAST(v_cancelTime AS DATE), ' ',
+                LPAD(17 + FLOOR(RAND() * 1), 2, '0'), ':',
+                LPAD(FLOOR(RAND() * 60), 2, '0'), ':',
+                LPAD(FLOOR(RAND() * 60), 2, '0'));
+        END IF;
+
+        -- 进行中或已完成或违约：设置打卡时间（仅设置合适的类型）
+        IF v_status = 2 THEN
+            -- 进行中：打卡时间在开始时间后 0~29 分钟（但还没结束）
+            SET v_checkinTime = DATE_ADD(v_startTime, INTERVAL FLOOR(RAND() * 30) MINUTE);
+        ELSEIF v_status = 5 THEN
+            -- 已完成：打卡时间在开始时间后 0~29 分钟
+            SET v_checkinTime = DATE_ADD(v_startTime, INTERVAL FLOOR(RAND() * 30) MINUTE);
+        ELSEIF v_status = 4 THEN
+            -- 违约：不打卡，但插入违约记录
+            SET v_checkinTime = NULL;
+        END IF;
+
+        -- 计算费用（元）
+        SET v_amount = amount_calculate(v_resId, v_startTime, v_endTime);
+
+        -- 插入预约
+        INSERT INTO reservation (
+            userId, resId, startTime, endTime, status,
+            createTime, cancelTime, checkinTime, amount
+        ) VALUES (
+            v_userId, v_resId, v_startTime, v_endTime, v_status,
+            v_createTime, v_cancelTime, v_checkinTime, v_amount
+        );
+
+        SET v_new_revId = LAST_INSERT_ID();
+
+        -- 如果是违约状态（status=4），插入违约记录
+        IF v_status = 4 THEN
+            INSERT INTO violation (userId, revId, violateTime, reason, handleStatus)
+            VALUES (v_userId, v_new_revId, DATE_ADD(v_startTime, INTERVAL 30 MINUTE), '预约开始后30分钟内未打卡', 1);
+        END IF;
+
+        SET i = i + 1;
+    END WHILE;
+END$$
+
+DELIMITER ;

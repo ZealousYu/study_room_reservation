@@ -1,0 +1,12 @@
+#每 5 分钟检查一次所有“待支付”的订单，如果订单创建时间已超过 15 分钟仍未支付，则自动将其状态改为“已取消”
+CREATE PROCEDURE cancel_unpaid_orders()
+BEGIN
+  UPDATE foodorder 
+  SET status = 5, cancelTime = NOW()
+  WHERE status = 1 
+    AND createTime < DATE_SUB(NOW(), INTERVAL 15 MINUTE);
+END;
+
+CREATE EVENT evt_cancel_unpaid_orders
+ON SCHEDULE EVERY 5 MINUTE
+DO CALL cancel_unpaid_orders();

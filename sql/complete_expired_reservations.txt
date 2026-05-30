@@ -1,0 +1,13 @@
+DROP PROCEDURE IF EXISTS complete_expired_reservations;
+CREATE PROCEDURE complete_expired_reservations()
+BEGIN
+  UPDATE reservation 
+  SET status = 5 
+  WHERE status = 2 
+    AND endTime < NOW() 
+    AND checkinTime IS NOT NULL; #已打卡才正常完成，未打卡的已被违约处理
+END;
+
+CREATE EVENT evt_complete_reservations
+ON SCHEDULE EVERY 15 MINUTE
+DO CALL complete_expired_reservations();

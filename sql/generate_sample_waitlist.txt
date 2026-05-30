@@ -1,0 +1,91 @@
+DROP PROCEDURE IF EXISTS generate_sample_waitlist;
+
+DELIMITER $$
+
+CREATE PROCEDURE generate_sample_waitlist(IN p_base_date DATE)
+BEGIN
+    DECLARE i INT DEFAULT 1;
+    DECLARE v_userId INT;
+    DECLARE v_resId INT;
+    DECLARE v_startDate DATE;
+    DECLARE v_startHour INT;
+    DECLARE v_duration INT;
+    DECLARE v_startTime DATETIME;
+    DECLARE v_endTime DATETIME;
+    DECLARE v_status INT;
+    DECLARE v_createTime DATETIME;
+    DECLARE v_cancelTime DATETIME;
+    DECLARE v_createDate DATE;
+    DECLARE v_createHour INT;
+    DECLARE v_createMin INT;
+    DECLARE v_createSec INT;
+    DECLARE v_cancelDate DATE;
+
+    IF p_base_date IS NULL THEN
+        SET p_base_date = CURDATE();
+    END IF;
+
+    WHILE i <= 10 DO
+        -- 随机用户（1~13）
+        SET v_userId = ELT(1 + FLOOR(RAND() * 13), 1,2,3,4,5,6,7,8,9,10,11,12,13);
+        -- 随机座位（1~37）
+        SET v_resId = ELT(1 + FLOOR(RAND() * 37),
+            1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38);
+
+        -- 状态分配：等待中5条，已取消2条，未成功3条
+        IF i <= 5 THEN
+            SET v_status = 1;
+        ELSEIF i <= 7 THEN
+            SET v_status = 3;
+        ELSE
+            SET v_status = 4;
+        END IF;
+
+        -- 期望开始时间（未来一周内，整点）
+        SET v_startDate = DATE_ADD(p_base_date, INTERVAL FLOOR(RAND() * 7) DAY);
+        SET v_startHour = 6 + FLOOR(RAND() * 17);
+        SET v_duration = 1 + FLOOR(RAND() * 17);
+        IF v_startHour + v_duration > 23 THEN
+            SET v_duration = 23 - v_startHour;
+        END IF;
+
+        SET v_startTime = CONCAT(CAST(v_startDate AS CHAR), ' ', LPAD(v_startHour, 2, '0'), ':00:00');
+        SET v_endTime = DATE_ADD(v_startTime, INTERVAL v_duration HOUR);
+
+        -- 创建时间（最近30天内，且不晚于期望开始时间）
+        SET v_createDate = DATE_SUB(p_base_date, INTERVAL FLOOR(RAND() * 30) DAY);
+        SET v_createHour = FLOOR(RAND() * 24);
+        SET v_createMin = FLOOR(RAND() * 60);
+        SET v_createSec = FLOOR(RAND() * 60);
+        SET v_createTime = CONCAT(CAST(v_createDate AS CHAR), ' ',
+            LPAD(v_createHour, 2, '0'), ':',
+            LPAD(v_createMin, 2, '0'), ':',
+            LPAD(v_createSec, 2, '0'));
+
+        IF v_createTime > v_startTime THEN
+            SET v_createDate = DATE_SUB(v_startDate, INTERVAL 1 DAY);
+            SET v_createTime = CONCAT(CAST(v_createDate AS CHAR), ' ',
+                LPAD(v_createHour, 2, '0'), ':',
+                LPAD(v_createMin, 2, '0'), ':',
+                LPAD(v_createSec, 2, '0'));
+        END IF;
+
+        -- 取消时间（仅已取消状态，为开始日期前一天 17:xx）
+        SET v_cancelTime = NULL;
+        IF v_status = 3 THEN
+            SET v_cancelDate = DATE_SUB(v_startDate, INTERVAL 1 DAY);
+            SET v_cancelTime = CONCAT(CAST(v_cancelDate AS CHAR), ' ',
+                LPAD(17 + FLOOR(RAND() * 1), 2, '0'), ':',
+                LPAD(FLOOR(RAND() * 60), 2, '0'), ':',
+                LPAD(FLOOR(RAND() * 60), 2, '0'));
+        END IF;
+
+        -- 插入候补记录（不关联预约，revId = NULL）
+        INSERT INTO waitlist (userId, resId, startTime, endTime, createTime, cancelTime, status, revId)
+        VALUES (v_userId, v_resId, v_startTime, v_endTime, v_createTime, v_cancelTime, v_status, NULL);
+
+        SET i = i + 1;
+    END WHILE;
+END$$
+
+DELIMITER ;

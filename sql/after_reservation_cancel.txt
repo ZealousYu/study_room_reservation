@@ -1,0 +1,9 @@
+#应用层用户成功执行取消操作时，立刻调用候补转正过程
+CREATE TRIGGER after_reservation_cancel
+AFTER UPDATE ON reservation
+FOR EACH ROW
+BEGIN
+    IF OLD.status != 2 AND NEW.status = 2 THEN
+        CALL promote_waitlist_for_seat(NEW.resId);
+    END IF;
+END;

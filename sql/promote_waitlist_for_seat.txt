@@ -1,0 +1,45 @@
+DROP PROCEDURE IF EXISTS promote_waitlist_for_seat;
+CREATE PROCEDURE promote_waitlist_for_seat(IN p_resId INT)
+BEGIN
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE v_waitId INT;
+    DECLARE v_userId INT;
+    DECLARE v_waitStart DATETIME;
+    DECLARE v_waitEnd DATETIME;
+    DECLARE v_amount DECIMAL(10,2);
+    DECLARE v_newRevId INT;
+    
+    DECLARE cur CURSOR FOR
+        SELECT waitId, userId, startTime, endTime
+        FROM waitlist
+        WHERE resId = p_resId AND status = 1
+        ORDER BY createTime ASC
+        FOR UPDATE;  #锁定这些行，防止并发转正冲突
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+    
+    OPEN cur;
+    read_loop: LOOP
+        FETCH cur INTO v_waitId, v_userId, v_waitStart, v_waitEnd;
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+        
+        #检查是否有有效预约冲突（status=1的预约）
+        IF NOT EXISTS (
+            SELECT 1 FROM reservation
+            WHERE resId = p_resId
+              AND status = 1
+              AND NOT (endTime <= v_waitStart OR startTime >= v_waitEnd)
+        ) THEN
+            #计算费用
+            SET v_amount = amount_calculate(p_resId, v_waitStart, v_waitEnd);
+            #插入预约
+            INSERT INTO reservation (userId, resId, startTime, endTime, status, createTime, amount)
+            VALUES (v_userId, p_resId, v_waitStart, v_waitEnd, 0, NOW(), v_amount);
+            SET v_newRevId = LAST_INSERT_ID();
+            #更新候补记录
+            UPDATE waitlist SET status = 2, revId = v_newRevId WHERE waitId = v_waitId;
+        END IF;
+    END LOOP;
+    CLOSE cur;
+END;

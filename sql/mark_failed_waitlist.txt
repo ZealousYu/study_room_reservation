@@ -1,0 +1,19 @@
+CREATE PROCEDURE mark_failed_waitlist()
+BEGIN
+    #标记明天（CURDATE()+1）的候补中，仍存在冲突的记录为失败
+    UPDATE waitlist w
+    SET w.status = 4
+    WHERE w.status = 1
+      AND DATE(w.startTime) = CURDATE() + INTERVAL 1 DAY
+      AND EXISTS (
+          SELECT 1 FROM reservation r
+          WHERE r.resId = w.resId
+            AND r.status = 1   #有效的预约
+            AND NOT (r.endTime <= w.startTime OR r.startTime >= w.endTime)
+      );
+END;
+
+CREATE EVENT evt_mark_failed_waitlist
+ON SCHEDULE EVERY 1 DAY
+STARTS TIMESTAMP(CURDATE(), '18:30:00')
+DO CALL mark_failed_waitlist();

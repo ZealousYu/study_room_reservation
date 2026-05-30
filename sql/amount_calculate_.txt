@@ -1,0 +1,22 @@
+CREATE FUNCTION amount_calculate(p_resId INT, p_start DATETIME, p_end DATETIME)
+RETURNS DECIMAL(10,2)
+DETERMINISTIC
+BEGIN
+    DECLARE v_type INT;
+    DECLARE v_hours INT;
+    DECLARE v_price_per_hour INT;
+    DECLARE v_total INT;
+    
+    SELECT type INTO v_type FROM resource WHERE resId = p_resId;
+    IF v_type = 1 THEN  #自习工位
+        SET v_price_per_hour = 500;
+    ELSE                #会议室
+        SET v_price_per_hour = 2000;
+    END IF;
+    
+    #计算预约时长（小时）
+    SET v_hours = TIMESTAMPDIFF(HOUR, p_start, p_end);
+    SET v_total = v_hours * v_price_per_hour;
+    
+    RETURN v_total;
+END;

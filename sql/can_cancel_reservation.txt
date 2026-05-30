@@ -1,0 +1,14 @@
+#检查指定预约是否允许取消，如果超过截止时间则不允许（返回1允许，0不允许）
+CREATE FUNCTION can_cancel_reservation(p_revId INT)
+RETURNS INT DETERMINISTIC
+BEGIN
+    DECLARE v_startTime DATETIME;
+    DECLARE v_cutoff DATETIME;
+    SELECT startTime INTO v_startTime FROM reservation WHERE revId = p_revId;
+    IF v_startTime IS NULL THEN
+        RETURN 0;
+    END IF;
+    -- 截止时间为开始日期的前一天 18:00
+    SET v_cutoff = DATE_SUB(DATE(v_startTime), INTERVAL 1 DAY) + INTERVAL 18 HOUR;
+    RETURN IF(NOW() <= v_cutoff, 1, 0);
+END;

@@ -1,0 +1,12 @@
+CREATE TRIGGER before_reservation_update
+BEFORE UPDATE ON reservation
+FOR EACH ROW
+BEGIN
+    #如果状态从非取消变为取消，且当前时间已超过截止时间
+    IF OLD.status != 2 AND NEW.status = 2 THEN
+        IF can_cancel_reservation(OLD.revId) = 0 THEN
+            SIGNAL SQLSTATE '45000' 
+            SET MESSAGE_TEXT = 'Cannot cancel: exceeded cancellation deadline (18:00 day before)';
+        END IF;
+    END IF;
+END;

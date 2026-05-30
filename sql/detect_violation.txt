@@ -1,0 +1,26 @@
+DROP PROCEDURE IF EXISTS detect_violation;
+CREATE PROCEDURE detect_violation()
+BEGIN
+  INSERT INTO violation (userId, revId, violateTime, reason, handleStatus)
+  SELECT r.userId, r.revId, NOW(), '预约开始后半小时内未打卡', 1
+  FROM reservation r
+  WHERE r.status = 1 
+    AND r.startTime <= NOW() 
+    AND r.checkinTime IS NULL
+    AND r.startTime < DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+    AND NOT EXISTS (
+      SELECT 1 FROM violation v WHERE v.revId = r.revId
+    );
+  
+#将对应预约状态改为“已违约”
+  UPDATE reservation r
+  SET r.status = 4
+  WHERE r.status = 1 
+    AND r.startTime <= NOW() 
+    AND r.checkinTime IS NULL
+    AND r.startTime < DATE_SUB(NOW(), INTERVAL 30 MINUTE);
+END;
+
+CREATE EVENT evt_detect_violation
+ON SCHEDULE EVERY 10 MINUTE
+DO CALL detect_violation();
