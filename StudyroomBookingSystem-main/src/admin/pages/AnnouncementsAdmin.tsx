@@ -1,26 +1,51 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 
 export function AnnouncementsAdmin() {
   const {
-    announcements,
+    adminAnnouncements,
     adminCreateAnnouncement,
     adminUpdateAnnouncement,
     adminDeleteAnnouncement,
+    refreshAdminAnnouncements,
   } = useApp();
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    void refreshAdminAnnouncements();
+  }, [refreshAdminAnnouncements]);
 
   const editingItem = useMemo(
-    () => announcements.find((item) => item.id === editingId) ?? null,
-    [announcements, editingId]
+    () => adminAnnouncements.find((item) => item.id === editingId) ?? null,
+    [adminAnnouncements, editingId]
   );
+
+  async function handleSave() {
+    const t = title.trim();
+    const c = content.trim();
+    if (!t || !c) return;
+    setSaving(true);
+    try {
+      if (editingItem) {
+        await adminUpdateAnnouncement(editingItem.id, { title: t, content: c });
+      } else {
+        await adminCreateAnnouncement({ title: t, content: c });
+      }
+      setTitle('');
+      setContent('');
+      setEditingId(null);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <>
       <h1 className="admin-page-title">公告管理</h1>
-      <p className="admin-page-desc">发布、编辑、删除公告内容</p>
+      <p className="admin-page-desc">发布、编辑、删除公告内容（用户端首页同步展示）</p>
 
       <div className="admin-card" style={{ display: 'grid', gap: 10 }}>
         <input
@@ -40,21 +65,10 @@ export function AnnouncementsAdmin() {
           <button
             type="button"
             className="admin-btn admin-btn-primary"
-            onClick={() => {
-              const t = title.trim();
-              const c = content.trim();
-              if (!t || !c) return;
-              if (editingItem) {
-                adminUpdateAnnouncement(editingItem.id, { title: t, content: c });
-              } else {
-                adminCreateAnnouncement({ title: t, content: c });
-              }
-              setTitle('');
-              setContent('');
-              setEditingId(null);
-            }}
+            disabled={saving}
+            onClick={() => void handleSave()}
           >
-            {editingItem ? '保存修改' : '发布公告'}
+            {saving ? '保存中…' : editingItem ? '保存修改' : '发布公告'}
           </button>
           {editingItem ? (
             <button
@@ -84,7 +98,7 @@ export function AnnouncementsAdmin() {
             </tr>
           </thead>
           <tbody>
-            {announcements.map((item) => (
+            {adminAnnouncements.map((item) => (
               <tr key={item.id}>
                 <td>{item.title}</td>
                 <td>{item.content}</td>
@@ -111,7 +125,7 @@ export function AnnouncementsAdmin() {
                         setTitle('');
                         setContent('');
                       }
-                      adminDeleteAnnouncement(item.id);
+                      void adminDeleteAnnouncement(item.id);
                     }}
                   >
                     删除
@@ -119,7 +133,7 @@ export function AnnouncementsAdmin() {
                 </td>
               </tr>
             ))}
-            {announcements.length === 0 ? (
+            {adminAnnouncements.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ textAlign: 'center' }}>
                   暂无公告

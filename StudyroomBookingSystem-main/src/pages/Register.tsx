@@ -15,13 +15,13 @@ export function Register() {
     if (user) navigate('/', { replace: true });
   }, [user, navigate]);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (password !== password2) {
       setToast('两次密码不一致');
       return;
     }
-    const r = register(phone, password);
+    const r = await register(phone, password);
     setToast(r.message);
     if (r.ok) {
       setTimeout(() => navigate('/', { replace: true }), 400);

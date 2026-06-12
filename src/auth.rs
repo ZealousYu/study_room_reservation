@@ -1,10 +1,10 @@
 use crate::error::AppError;
 use axum::{
     extract::Request,
-    http::StatusCode,
     middleware::Next,
     response::Response,
 };
+use bcrypt::verify;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,15 @@ fn verify_token(token: &str) -> Result<Claims, AppError> {
     )
     .map(|data| data.claims)
     .map_err(|_| AppError::Unauthorized)
+}
+
+/// 兼容 SQL 种子数据中的明文密码，以及注册后存入的 bcrypt 哈希。
+pub fn check_password(input: &str, stored: &str) -> Result<bool, AppError> {
+    if stored.starts_with("$2a$") || stored.starts_with("$2b$") || stored.starts_with("$2y$") {
+        verify(input, stored).map_err(|_| AppError::Internal)
+    } else {
+        Ok(input == stored)
+    }
 }
 
 pub async fn user_auth_middleware(mut req: Request, next: Next) -> Result<Response, AppError> {

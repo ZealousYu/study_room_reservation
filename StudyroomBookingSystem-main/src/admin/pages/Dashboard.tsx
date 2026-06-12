@@ -1,24 +1,37 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 
 export function Dashboard() {
-  const { reservations, foodOrders, waitlist, breachRecords, products } = useApp();
+  const {
+    adminReservations,
+    adminOrders,
+    waitlist,
+    breachRecords,
+    products,
+    refreshAdminOrders,
+    refreshAdminReservations,
+  } = useApp();
+
+  useEffect(() => {
+    void refreshAdminOrders();
+    void refreshAdminReservations();
+  }, [refreshAdminOrders, refreshAdminReservations]);
 
   const stats = useMemo(
     () => ({
-      res: reservations.length,
-      orders: foodOrders.length,
+      res: adminReservations.length,
+      orders: adminOrders.length,
       wl: waitlist.filter((w) => w.status === '排队中').length,
       breach: breachRecords.length,
       lowStock: products.filter((p) => p.stock < 10).length,
     }),
-    [reservations, foodOrders, waitlist, breachRecords, products]
+    [adminReservations, adminOrders, waitlist, breachRecords, products]
   );
 
   return (
     <>
       <h1 className="admin-page-title">运营概览</h1>
-      <p className="admin-page-desc">演示数据与客户端共用，刷新后部分状态会重置</p>
+      <p className="admin-page-desc">订单数据来自后端数据库</p>
 
       <div className="admin-stats">
         <div className="admin-stat">

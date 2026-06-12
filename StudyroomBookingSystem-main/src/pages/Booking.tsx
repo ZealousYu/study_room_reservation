@@ -114,29 +114,37 @@ export function Booking() {
     setWaitlistSlots([]);
   }
 
-  function confirmReserve() {
+  async function confirmReserve() {
     if (!seat) return;
     if (!canBookSlots(seat.code, date, selectedSlots)) {
       setToast('所选时段已满或冲突，请返回修改；心仪时段若已满可加入下方候补');
       return;
     }
-    const r = createReservation({
+    const r = await createReservation({
       seatCode: seat.code,
       date,
       slots: selectedSlots,
       fee: feeForSlots(selectedSlots),
     });
+    if (!r) {
+      setToast('创建预约失败，请稍后重试');
+      return;
+    }
     setLastResId(r.id);
     setVerifyCode(r.verifyCode);
     setToast('订单已创建，请选择支付方式');
   }
 
-  function mockPay(method: string) {
+  async function mockPay(method: string) {
     if (!lastResId) {
       setToast('请先确认预约');
       return;
     }
-    payReservation(lastResId);
+    const ok = await payReservation(lastResId);
+    if (!ok) {
+      setToast('支付失败，请稍后重试');
+      return;
+    }
     setToast(`已跳转${method}（演示）· 支付成功`);
     setStep(1);
     setSeat(null);

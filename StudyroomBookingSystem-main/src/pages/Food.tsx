@@ -35,10 +35,10 @@ export function Food() {
         </div>
         <Link
           to="/cart"
-          className="btn btn-ghost"
+          className="btn btn-primary"
           style={{ whiteSpace: 'nowrap', textDecoration: 'none' }}
         >
-          购物车 {cartCount > 0 ? `(${cartCount})` : ''}
+          购物车{cartCount > 0 ? ` (${cartCount})` : ''}
         </Link>
       </div>
 
@@ -112,7 +112,10 @@ export function Food() {
                     style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem' }}
                     onClick={() => {
                       const r = addToCart(p);
-                      if (!r.ok) setToast(r.message);
+                      setToast(null);
+                      window.requestAnimationFrame(() => {
+                        setToast(r.ok ? '已经加入购物车' : r.message);
+                      });
                     }}
                   >
                     加入购物车

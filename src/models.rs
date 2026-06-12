@@ -136,6 +136,20 @@ pub struct CheckinRequest {
     pub revId: i32,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateReservationRequest {
+    pub seatCode: String,
+    pub date: String,
+    pub slots: Vec<String>,
+    pub fee: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProductQuery {
+    pub category: Option<i32>,
+    pub on_shelf: Option<bool>,
+}
+
 // 管理员端请求
 #[derive(Debug, Deserialize)]
 pub struct AdminSeatUpdate {

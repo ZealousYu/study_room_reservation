@@ -7,7 +7,7 @@ import './admin.css';
 export function AdminLogin() {
   const { adminUser, adminLogin } = useApp();
   const navigate = useNavigate();
-  const [account, setAccount] = useState('admin');
+  const [account, setAccount] = useState('gft141');
   const [password, setPassword] = useState('');
   const [toast, setToast] = useState<string | null>(null);
 
@@ -15,9 +15,9 @@ export function AdminLogin() {
     if (adminUser) navigate('/admin', { replace: true });
   }, [adminUser, navigate]);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    const r = adminLogin(account, password);
+    const r = await adminLogin(account, password);
     setToast(r.message);
     if (r.ok) {
       setTimeout(() => navigate('/admin', { replace: true }), 300);
@@ -28,7 +28,7 @@ export function AdminLogin() {
     <div className="admin-login">
       <div className="admin-login-card">
         <h1>管理员登录</h1>
-        <p>账号 + 密码（演示：账号 admin，密码任意非空）</p>
+        <p>使用后台管理员账号登录（示例：gft141 / 141414）</p>
         <form onSubmit={handleSubmit}>
           <div className="admin-field">
             <label htmlFor="adm-acc">账号</label>

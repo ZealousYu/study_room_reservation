@@ -1,4 +1,4 @@
-use crate::auth::{generate_token, Claims};
+use crate::auth::{check_password, generate_token, Claims};
 use crate::error::{AppError, Result};
 use crate::models::*;
 use axum::{
@@ -6,10 +6,9 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use bcrypt::verify;
 use chrono::Utc;
 use serde_json::json;
-use sqlx::MySqlPool;
+use sqlx::{MySqlPool, Row};
 
 fn cents_to_yuan(cents: i64) -> f64 {
     cents as f64 / 100.0
@@ -24,32 +23,38 @@ pub async fn admin_login(
     State(pool): State<MySqlPool>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<serde_json::Value>> {
-    let row = sqlx::query!(
+    let row = sqlx::query(
         "SELECT userId, account, realName, userType, password, state FROM users WHERE account = ?",
-        req.phone
     )
+    .bind(&req.phone)
     .fetch_optional(&pool)
     .await?
     .ok_or(AppError::Unauthorized)?;
 
-    if row.userType != 2 {
+    let user_id: i32 = row.get(0);
+    let account: String = row.get(1);
+    let real_name: String = row.get(2);
+    let user_type: i32 = row.get(3);
+    let stored_hash: Option<String> = row.get(4);
+    let state: i32 = row.get(5);
+
+    if user_type != 2 {
         return Err(AppError::Unauthorized);
     }
-    if row.state != 1 {
+    if state != 1 {
         return Err(AppError::Unauthorized);
     }
-    let stored_hash = row.password.ok_or(AppError::Internal)?;
-    let is_valid = verify(&req.password, &stored_hash).map_err(|_| AppError::Internal)?;
-    if !is_valid {
+    let stored_hash = stored_hash.ok_or(AppError::Internal)?;
+    if !check_password(&req.password, &stored_hash)? {
         return Err(AppError::Unauthorized);
     }
-    let token = generate_token(row.userId, &row.account, row.userType)?;
+    let token = generate_token(user_id, &account, user_type)?;
     Ok(Json(json!({
         "token": token,
-        "userId": row.userId,
-        "account": row.account,
-        "realName": row.realName,
-        "userType": row.userType,
+        "userId": user_id,
+        "account": account,
+        "realName": real_name,
+        "userType": user_type,
     })))
 }
 
@@ -151,7 +156,8 @@ pub async fn delete_seat(
     Extension(_claims): Extension<Claims>,
     State(pool): State<MySqlPool>,
 ) -> Result<StatusCode> {
-    let result = sqlx::query!("DELETE FROM resource WHERE resId = ?", id)
+    let result = sqlx::query("DELETE FROM resource WHERE resId = ?")
+        .bind(id)
         .execute(&pool)
         .await?;
     if result.rows_affected() == 0 {
@@ -262,25 +268,25 @@ pub async fn admin_mark_checkin(
     State(pool): State<MySqlPool>,
 ) -> Result<StatusCode> {
     let now = chrono::Local::now().naive_local();
-    let result = sqlx::query!(
+    let result = sqlx::query(
         "UPDATE reservation SET status = 2, checkinTime = ? WHERE revId = ? AND status = 1",
-        now,
-        rev_id
     )
+    .bind(now)
+    .bind(rev_id)
     .execute(&pool)
     .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
-    // 更新关联订单状态（如果有配送订单）
-    let order = sqlx::query!(
+    let order: Option<(i32,)> = sqlx::query_as(
         "SELECT orderId FROM foodorder WHERE revId = ? AND deliveryType = 1 AND status = 2",
-        rev_id
     )
+    .bind(rev_id)
     .fetch_optional(&pool)
     .await?;
-    if let Some(o) = order {
-        sqlx::query!("UPDATE foodorder SET status = 3 WHERE orderId = ?", o.orderId)
+    if let Some((order_id,)) = order {
+        sqlx::query("UPDATE foodorder SET status = 3 WHERE orderId = ?")
+            .bind(order_id)
             .execute(&pool)
             .await?;
     }
@@ -292,30 +298,28 @@ pub async fn admin_mark_violation(
     Extension(_claims): Extension<Claims>,
     State(pool): State<MySqlPool>,
 ) -> Result<StatusCode> {
-    let rev = sqlx::query!(
-        "SELECT userId, status FROM reservation WHERE revId = ?",
-        rev_id
-    )
-    .fetch_optional(&pool)
-    .await?
-    .ok_or(AppError::NotFound)?;
-    if rev.status != 1 {
+    let rev = sqlx::query("SELECT userId, status FROM reservation WHERE revId = ?")
+        .bind(rev_id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let rev_user_id: i32 = rev.get(0);
+    let status: i32 = rev.get(1);
+    if status != 1 {
         return Err(AppError::InvalidOrderStatus);
     }
     let now = chrono::Local::now().naive_local();
-    sqlx::query!(
-        "UPDATE reservation SET status = 4 WHERE revId = ?",
-        rev_id
-    )
-    .execute(&pool)
-    .await?;
-    sqlx::query!(
+    sqlx::query("UPDATE reservation SET status = 4 WHERE revId = ?")
+        .bind(rev_id)
+        .execute(&pool)
+        .await?;
+    sqlx::query(
         "INSERT INTO violation (userId, revId, violateTime, reason, handleStatus)
          VALUES (?, ?, ?, '管理员标记违约', 1)",
-        rev.userId,
-        rev_id,
-        now
     )
+    .bind(rev_user_id)
+    .bind(rev_id)
+    .bind(now)
     .execute(&pool)
     .await?;
     Ok(StatusCode::OK)
@@ -587,7 +591,9 @@ pub async fn admin_handle_violation(
     Json(req): Json<serde_json::Value>,
 ) -> Result<StatusCode> {
     let handle_status = req["handleStatus"].as_i64().ok_or(AppError::BadRequest("需要 handleStatus 字段".into()))? as i32;
-    let result = sqlx::query!("UPDATE violation SET handleStatus = ? WHERE vioId = ?", handle_status, vio_id)
+    let result = sqlx::query("UPDATE violation SET handleStatus = ? WHERE vioId = ?")
+        .bind(handle_status)
+        .bind(vio_id)
         .execute(&pool)
         .await?;
     if result.rows_affected() == 0 {
@@ -676,7 +682,8 @@ pub async fn delete_notice(
     Extension(_claims): Extension<Claims>,
     State(pool): State<MySqlPool>,
 ) -> Result<StatusCode> {
-    let result = sqlx::query!("DELETE FROM notice WHERE nId = ?", nid)
+    let result = sqlx::query("DELETE FROM notice WHERE nId = ?")
+        .bind(nid)
         .execute(&pool)
         .await?;
     if result.rows_affected() == 0 {

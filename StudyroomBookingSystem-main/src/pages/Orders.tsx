@@ -1,12 +1,15 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { formatDeliveryStatus, useApp } from '../context/AppContext';
 import { Toast } from '../components/Toast';
 
 export function Orders() {
-  const { foodOrders, payFoodOrder, cancelFoodOrder } = useApp();
+  const { foodOrders, payFoodOrder, cancelFoodOrder, refreshFoodOrders } = useApp();
   const [toast, setToast] = useState<string | null>(null);
-  // 防止重复点击，但不影响按钮外观
   const processingRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    void refreshFoodOrders();
+  }, [refreshFoodOrders]);
 
   async function pay(orderId: string) {
     if (processingRef.current) return;

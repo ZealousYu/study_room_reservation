@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type { DeliveryStatus, OrderStatus } from '../../context/AppContext';
 import { formatDeliveryStatus, useApp } from '../../context/AppContext';
 
@@ -21,70 +22,80 @@ const DELIVERY_OPTIONS: { value: DeliveryStatus; label: string }[] = [
 ];
 
 export function OrdersAdmin() {
-  const { foodOrders, adminSetOrderStatus, adminSetDeliveryStatus } = useApp();
+  const { adminOrders, adminSetOrderStatus, adminSetDeliveryStatus, refreshAdminOrders } = useApp();
+
+  useEffect(() => {
+    void refreshAdminOrders();
+  }, [refreshAdminOrders]);
 
   return (
     <>
       <h1 className="admin-page-title">订单管理</h1>
-      <p className="admin-page-desc">点单状态与配送进度（演示）</p>
+      <p className="admin-page-desc">来自数据库的全部用户订单</p>
 
       <div className="admin-card admin-table-wrap">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>订单号</th>
-              <th>金额</th>
-              <th>配送方式</th>
-              <th>订单状态</th>
-              <th>配送/履约</th>
-              <th>调整</th>
-            </tr>
-          </thead>
-          <tbody>
-            {foodOrders.map((o) => (
-              <tr key={o.id}>
-                <td>{o.id}</td>
-                <td>¥{o.total}</td>
-                <td>{o.delivery}</td>
-                <td>{o.status}</td>
-                <td style={{ fontSize: '0.82rem' }}>{formatDeliveryStatus(o)}</td>
-                <td>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 140 }}>
-                    <select
-                      className="admin-input"
-                      value={o.status}
-                      onChange={(e) =>
-                        adminSetOrderStatus(o.id, e.target.value as OrderStatus)
-                      }
-                    >
-                      {ORDER_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="admin-input"
-                      value={o.deliveryStatus}
-                      onChange={(e) =>
-                        adminSetDeliveryStatus(
-                          o.id,
-                          e.target.value as DeliveryStatus
-                        )
-                      }
-                    >
-                      {DELIVERY_OPTIONS.map((d) => (
-                        <option key={d.value} value={d.value}>
-                          {d.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </td>
+        {adminOrders.length === 0 ? (
+          <p style={{ padding: '1rem', color: '#666', margin: 0 }}>暂无订单</p>
+        ) : (
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>订单号</th>
+                <th>用户</th>
+                <th>金额</th>
+                <th>配送方式</th>
+                <th>订单状态</th>
+                <th>配送/履约</th>
+                <th>调整</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {adminOrders.map((o) => (
+                <tr key={o.id}>
+                  <td>{o.orderNo}</td>
+                  <td>
+                    <div>{o.userName}</div>
+                    <div style={{ fontSize: '0.78rem', color: '#888' }}>{o.userPhone}</div>
+                  </td>
+                  <td>¥{o.total}</td>
+                  <td>{o.delivery}</td>
+                  <td>{o.status}</td>
+                  <td style={{ fontSize: '0.82rem' }}>{formatDeliveryStatus(o)}</td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 140 }}>
+                      <select
+                        className="admin-input"
+                        value={o.status}
+                        onChange={(e) =>
+                          void adminSetOrderStatus(o.id, e.target.value as OrderStatus)
+                        }
+                      >
+                        {ORDER_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="admin-input"
+                        value={o.deliveryStatus}
+                        onChange={(e) =>
+                          adminSetDeliveryStatus(o.id, e.target.value as DeliveryStatus)
+                        }
+                      >
+                        {DELIVERY_OPTIONS.map((d) => (
+                          <option key={d.value} value={d.value}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );

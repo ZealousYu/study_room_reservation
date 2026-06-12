@@ -143,27 +143,95 @@
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 96px;
-  transform: translateX(-50%);
-  z-index: 1000;
-  padding: 0.55rem 1rem;
-  border-radius: 999px;
-  background: rgba(30, 43, 34, 0.88);
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+  padding: 0.85rem 1.35rem;
+  border-radius: 14px;
+  background: rgba(30, 43, 34, 0.94);
   color: #fff;
-  font-size: 0.88rem;
-  max-width: 90vw;
+  font-size: 0.95rem;
+  font-weight: 600;
+  max-width: min(88vw, 360px);
   text-align: center;
-  animation: toast-in 0.2s ease;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  animation: toast-in 0.25s ease;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(20, 28, 22, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal-card {
+  width: min(100%, 400px);
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+  padding: 1.25rem 1.15rem 1.1rem;
+}
+
+.modal-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+}
+
+.modal-sub {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.modal-items {
+  margin: 0.85rem 0;
+  padding: 0.75rem 0.85rem;
+  list-style: none;
+  background: var(--primary-soft);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+}
+
+.modal-items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0.25rem 0;
+}
+
+.modal-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+
+.modal-total strong {
+  color: var(--primary);
+  font-size: 1.25rem;
+}
+
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
 }
 
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 6px);
+    transform: translate(-50%, calc(-50% + 8px));
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translate(-50%, -50%);
   }
 }
 

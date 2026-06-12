@@ -23,5 +23,6 @@ chrono = { version = "0.4", features = ["serde"] }
 jsonwebtoken = "9"
 rand = "0.8"
 tracing-subscriber = "0.3"
+tracing = "0.1"
 bcrypt = "0.15"
 uuid = { version = "1", features = ["v4"] }
