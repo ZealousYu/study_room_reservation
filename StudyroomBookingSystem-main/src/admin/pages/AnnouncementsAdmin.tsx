@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { Toast } from '../../components/Toast';
 
 export function AnnouncementsAdmin() {
   const {
@@ -13,6 +14,7 @@ export function AnnouncementsAdmin() {
   const [content, setContent] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     void refreshAdminAnnouncements();
@@ -26,17 +28,24 @@ export function AnnouncementsAdmin() {
   async function handleSave() {
     const t = title.trim();
     const c = content.trim();
-    if (!t || !c) return;
+    if (!t || !c) {
+      setToast('请填写标题和内容');
+      return;
+    }
     setSaving(true);
     try {
       if (editingItem) {
         await adminUpdateAnnouncement(editingItem.id, { title: t, content: c });
+        setToast('公告已更新');
       } else {
         await adminCreateAnnouncement({ title: t, content: c });
+        setToast('公告已发布');
       }
       setTitle('');
       setContent('');
       setEditingId(null);
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : '保存失败');
     } finally {
       setSaving(false);
     }
@@ -120,12 +129,17 @@ export function AnnouncementsAdmin() {
                     type="button"
                     className="admin-btn"
                     onClick={() => {
+                      if (!window.confirm('确定删除这条公告？')) return;
                       if (editingId === item.id) {
                         setEditingId(null);
                         setTitle('');
                         setContent('');
                       }
-                      void adminDeleteAnnouncement(item.id);
+                      void adminDeleteAnnouncement(item.id)
+                        .then(() => setToast('已删除'))
+                        .catch((err) =>
+                          setToast(err instanceof Error ? err.message : '删除失败')
+                        );
                     }}
                   >
                     删除
@@ -143,6 +157,8 @@ export function AnnouncementsAdmin() {
           </tbody>
         </table>
       </div>
+
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </>
   );
 }

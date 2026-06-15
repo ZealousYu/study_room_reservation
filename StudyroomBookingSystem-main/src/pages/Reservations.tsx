@@ -1,6 +1,7 @@
 import { useApp } from '../context/AppContext';
 import { Toast } from '../components/Toast';
 import { useState } from 'react';
+import { formatReservationTime } from '../utils/reservation';
 
 export function Reservations() {
   const { reservations, cancelReservation, waitlist, cancelWaitlist } = useApp();
@@ -39,8 +40,8 @@ export function Reservations() {
                 {r.status}
               </span>
             </div>
-            <div style={{ fontSize: '0.88rem', marginTop: 6 }}>
-              {r.slots.join('，')}
+            <div style={{ fontSize: '0.88rem', marginTop: 6, color: 'var(--text-muted)' }}>
+              {formatReservationTime(r)}
             </div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
               ¥{r.fee}

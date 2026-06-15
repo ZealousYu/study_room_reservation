@@ -630,18 +630,21 @@ pub async fn create_notice(
 ) -> Result<Json<Notice>> {
     let now = chrono::Local::now().naive_local();
     let state = req.state.unwrap_or(1);
-    let notice = sqlx::query_as::<_, Notice>(
-        "INSERT INTO notice (title, content, createTime, state, userId)
-         VALUES (?, ?, ?, ?, ?)
-         RETURNING *"
+    let result = sqlx::query(
+        "INSERT INTO notice (title, content, createTime, state, userId) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&req.title)
     .bind(&req.content)
     .bind(now)
     .bind(state)
     .bind(claims.sub)
-    .fetch_one(&pool)
+    .execute(&pool)
     .await?;
+    let nid = result.last_insert_id() as i32;
+    let notice = sqlx::query_as::<_, Notice>("SELECT * FROM notice WHERE nId = ?")
+        .bind(nid)
+        .fetch_one(&pool)
+        .await?;
     Ok(Json(notice))
 }
 
@@ -668,12 +671,19 @@ pub async fn update_notice(
     if updates.is_empty() {
         return Err(AppError::BadRequest("没有要更新的字段".into()));
     }
-    let query = format!("UPDATE notice SET {} WHERE nId = ? RETURNING *", updates.join(", "));
-    let mut q = sqlx::query_as::<_, Notice>(&query);
-    for b in binds {
+    let query = format!("UPDATE notice SET {} WHERE nId = ?", updates.join(", "));
+    let mut q = sqlx::query(&query);
+    for b in &binds {
         q = q.bind(b);
     }
-    let notice = q.bind(nid).fetch_one(&pool).await?;
+    let result = q.bind(nid).execute(&pool).await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    let notice = sqlx::query_as::<_, Notice>("SELECT * FROM notice WHERE nId = ?")
+        .bind(nid)
+        .fetch_one(&pool)
+        .await?;
     Ok(Json(notice))
 }
 
@@ -699,10 +709,59 @@ pub async fn update_notice_state(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<Notice>> {
     let state = req["state"].as_i64().ok_or(AppError::BadRequest("需要 state 字段".into()))? as i32;
-    let notice = sqlx::query_as::<_, Notice>("UPDATE notice SET state = ? WHERE nId = ? RETURNING *")
+    let result = sqlx::query("UPDATE notice SET state = ? WHERE nId = ?")
         .bind(state)
+        .bind(nid)
+        .execute(&pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    let notice = sqlx::query_as::<_, Notice>("SELECT * FROM notice WHERE nId = ?")
         .bind(nid)
         .fetch_one(&pool)
         .await?;
     Ok(Json(notice))
+}
+
+// ========== 删除预约/订单（管理员） ==========
+pub async fn admin_delete_reservation(
+    Path(rev_id): Path<i32>,
+    Extension(_claims): Extension<Claims>,
+    State(pool): State<MySqlPool>,
+) -> Result<StatusCode> {
+    let exists = sqlx::query("SELECT revId FROM reservation WHERE revId = ?")
+        .bind(rev_id)
+        .fetch_optional(&pool)
+        .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+    sqlx::query("DELETE FROM violation WHERE revId = ?")
+        .bind(rev_id)
+        .execute(&pool)
+        .await?;
+    let result = sqlx::query("DELETE FROM reservation WHERE revId = ?")
+        .bind(rev_id)
+        .execute(&pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::OK)
+}
+
+pub async fn admin_delete_order(
+    Path(order_id): Path<i32>,
+    Extension(_claims): Extension<Claims>,
+    State(pool): State<MySqlPool>,
+) -> Result<StatusCode> {
+    let result = sqlx::query("DELETE FROM foodorder WHERE orderId = ?")
+        .bind(order_id)
+        .execute(&pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::OK)
 }

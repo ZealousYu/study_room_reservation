@@ -22,7 +22,13 @@ const DELIVERY_OPTIONS: { value: DeliveryStatus; label: string }[] = [
 ];
 
 export function OrdersAdmin() {
-  const { adminOrders, adminSetOrderStatus, adminSetDeliveryStatus, refreshAdminOrders } = useApp();
+  const {
+    adminOrders,
+    adminSetOrderStatus,
+    adminSetDeliveryStatus,
+    adminDeleteOrder,
+    refreshAdminOrders,
+  } = useApp();
 
   useEffect(() => {
     void refreshAdminOrders();
@@ -47,6 +53,7 @@ export function OrdersAdmin() {
                 <th>订单状态</th>
                 <th>配送/履约</th>
                 <th>调整</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -90,6 +97,18 @@ export function OrdersAdmin() {
                         ))}
                       </select>
                     </div>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="admin-btn"
+                      onClick={() => {
+                        if (!window.confirm(`确定删除订单 ${o.orderNo}？`)) return;
+                        void adminDeleteOrder(o.id);
+                      }}
+                    >
+                      删除
+                    </button>
                   </td>
                 </tr>
               ))}

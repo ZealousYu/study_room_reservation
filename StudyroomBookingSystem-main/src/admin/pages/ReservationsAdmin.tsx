@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 
 export function ReservationsAdmin() {
-  const { adminReservations, adminMarkReservation, refreshAdminReservations } = useApp();
+  const {
+    adminReservations,
+    adminMarkReservation,
+    adminDeleteReservation,
+    refreshAdminReservations,
+  } = useApp();
   const [q, setQ] = useState('');
 
   useEffect(() => {
@@ -62,24 +67,36 @@ export function ReservationsAdmin() {
                 <td>{r.status}</td>
                 <td>{r.checkInAt ?? '—'}</td>
                 <td>
-                  {r.status === '预约成功' && (
-                    <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="admin-btn"
-                        onClick={() => void adminMarkReservation(r.id, '到场')}
-                      >
-                        标记已到场
-                      </button>
-                      <button
-                        type="button"
-                        className="admin-btn"
-                        onClick={() => void adminMarkReservation(r.id, '违约')}
-                      >
-                        标记违约
-                      </button>
-                    </span>
-                  )}
+                  <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {r.status === '预约成功' && (
+                      <>
+                        <button
+                          type="button"
+                          className="admin-btn"
+                          onClick={() => void adminMarkReservation(r.id, '到场')}
+                        >
+                          标记已到场
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-btn"
+                          onClick={() => void adminMarkReservation(r.id, '违约')}
+                        >
+                          标记违约
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      className="admin-btn"
+                      onClick={() => {
+                        if (!window.confirm(`确定删除预约 ${r.id}？`)) return;
+                        void adminDeleteReservation(r.id);
+                      }}
+                    >
+                      删除
+                    </button>
+                  </span>
                 </td>
               </tr>
             ))}

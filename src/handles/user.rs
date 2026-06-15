@@ -528,6 +528,8 @@ pub async fn create_reservation(
         "seatCode": req.seatCode,
         "date": req.date,
         "slots": slots_json,
+        "startTime": start_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+        "endTime": end_time.format("%Y-%m-%d %H:%M:%S").to_string(),
         "status": "待支付",
         "fee": req.fee,
         "verifyCode": format!("{:X}", (rev_id as u64) % 0xFFFFFFFF),
@@ -593,24 +595,59 @@ pub async fn list_public_notices(State(pool): State<MySqlPool>) -> Result<Json<V
 }
 
 // ---------- 打卡 ----------
+const CHECKIN_WINDOW_MINUTES: i64 = 15;
+
 pub async fn checkin(
     Extension(claims): Extension<Claims>,
     State(pool): State<MySqlPool>,
     Json(req): Json<CheckinRequest>,
 ) -> Result<StatusCode> {
     let user_id = claims.sub;
-    let rev = sqlx::query("SELECT userId, status FROM reservation WHERE revId = ?")
+    let rev = sqlx::query("SELECT userId, status, startTime FROM reservation WHERE revId = ?")
         .bind(req.revId)
         .fetch_optional(&pool)
         .await?
         .ok_or(AppError::NotFound)?;
     let rev_user_id: i32 = rev.get(0);
     let status: i32 = rev.get(1);
+    let start_time: chrono::NaiveDateTime = rev.get(2);
     if rev_user_id != user_id {
         return Err(AppError::Forbidden);
     }
     if status != 1 {
         return Err(AppError::InvalidOrderStatus);
+    }
+    let now = chrono::Local::now().naive_local();
+    let window = chrono::Duration::minutes(CHECKIN_WINDOW_MINUTES);
+    if now < start_time - window {
+        return Err(AppError::BadRequest(
+            "尚未到打卡时间，请在预约开始前15分钟内打卡".into(),
+        ));
+    }
+    if now > start_time + window {
+        sqlx::query("UPDATE reservation SET status = 4 WHERE revId = ?")
+            .bind(req.revId)
+            .execute(&pool)
+            .await?;
+        let existing: Option<(i32,)> =
+            sqlx::query_as("SELECT vioId FROM violation WHERE revId = ? LIMIT 1")
+                .bind(req.revId)
+                .fetch_optional(&pool)
+                .await?;
+        if existing.is_none() {
+            sqlx::query(
+                "INSERT INTO violation (userId, revId, violateTime, reason, handleStatus)
+                 VALUES (?, ?, ?, '预约开始后15分钟内未打卡', 1)",
+            )
+            .bind(rev_user_id)
+            .bind(req.revId)
+            .bind(now)
+            .execute(&pool)
+            .await?;
+        }
+        return Err(AppError::BadRequest(
+            "已过打卡时间（预约开始后15分钟），本次预约已记为违约".into(),
+        ));
     }
     sqlx::query("UPDATE reservation SET status = 2, checkinTime = ? WHERE revId = ?")
         .bind(chrono::Local::now().naive_local())
@@ -680,6 +717,8 @@ pub async fn my_reservations(
             "seatCode": seat_code,
             "date": date,
             "slots": slots,
+            "startTime": start_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "endTime": end_time.format("%Y-%m-%d %H:%M:%S").to_string(),
             "status": status_str,
             "fee": cents_to_yuan(amount),
             "checkInAt": checkin_time.map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string()),

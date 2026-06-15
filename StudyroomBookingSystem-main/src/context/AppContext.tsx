@@ -68,6 +68,8 @@ export type Reservation = {
   seatCode: string;
   date: string;
   slots: string[];
+  startTime?: string;
+  endTime?: string;
   status: ReservationStatus;
   fee: number;
   checkInAt?: string;
@@ -242,10 +244,31 @@ const TOKEN_KEY = 'bookspace_token';
 const ADMIN_TOKEN_KEY = 'bookspace_admin_token';
 
 let onUnauthorized: (() => void) | null = null;
+let onAdminUnauthorized: (() => void) | null = null;
 
 function clearStoredSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(STORAGE_KEY);
+}
+
+function clearStoredAdminSession() {
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
+  localStorage.removeItem(ADMIN_KEY);
+}
+
+function readStoredAdmin(): AdminUser | null {
+  const token = localStorage.getItem(ADMIN_TOKEN_KEY);
+  const raw = localStorage.getItem(ADMIN_KEY);
+  if (!token || !raw || isTokenExpired(token)) {
+    clearStoredAdminSession();
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as AdminUser;
+  } catch {
+    clearStoredAdminSession();
+    return null;
+  }
 }
 
 function isTokenExpired(token: string): boolean {
@@ -309,16 +332,25 @@ async function apiRequest<T>(
 
 async function adminApiRequest<T>(url: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem(ADMIN_TOKEN_KEY);
+  if (!token || isTokenExpired(token)) {
+    clearStoredAdminSession();
+    onAdminUnauthorized?.();
+    throw new Error('管理员登录已过期，请重新登录');
+  }
   const res = await fetch(`http://localhost:8080${url}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      Authorization: `Bearer ${token}`,
       ...options?.headers,
     },
   });
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: '请求失败' }));
+    if (res.status === 401 || res.status === 403) {
+      clearStoredAdminSession();
+      onAdminUnauthorized?.();
+    }
     throw new Error(error.error || '请求失败');
   }
   const text = await res.text();
@@ -372,7 +404,7 @@ type AppContextValue = {
   ) => Promise<Reservation | null>;
   payReservation: (id: string) => Promise<boolean>;
   cancelReservation: (id: string) => Promise<{ ok: boolean; message: string }>;
-  checkIn: (reservationId: number) => Promise<void>;
+  checkIn: (reservationId: number) => Promise<{ ok: boolean; message: string }>;
   filterSeats: (filters: {
     outlet?: boolean;
     lamp?: boolean;
@@ -391,6 +423,8 @@ type AppContextValue = {
   adminSetOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
   adminSetDeliveryStatus: (orderId: string, deliveryStatus: DeliveryStatus) => void;
   adminMarkReservation: (id: string, mark: '到场' | '违约') => Promise<void>;
+  adminDeleteReservation: (id: string) => Promise<void>;
+  adminDeleteOrder: (id: string) => Promise<void>;
   adminClearBreachLimit: (phone: string) => void;
   adminCreateAnnouncement: (input: { title: string; content: string }) => Promise<void>;
   adminUpdateAnnouncement: (id: string, input: { title: string; content: string }) => Promise<void>;
@@ -404,15 +438,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [user, setUser] = useState<User | null>(() => readStoredUser());
 
-  const [adminUser, setAdminUser] = useState<AdminUser | null>(() => {
-    try {
-      const raw = localStorage.getItem(ADMIN_KEY);
-      if (raw) return JSON.parse(raw) as AdminUser;
-    } catch {
-      /* ignore */
-    }
-    return null;
-  });
+  const [adminUser, setAdminUser] = useState<AdminUser | null>(() => readStoredAdmin());
 
   const [seats, setSeats] = useState<Seat[]>(() => SEED_SEATS.map((s) => ({ ...s, enabled: true })));
   const [products, setProducts] = useState<Product[]>([]);
@@ -626,6 +652,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   useEffect(() => {
+    onAdminUnauthorized = () => {
+      setAdminUser(null);
+      setAdminOrders([]);
+      setAdminReservations([]);
+      setAdminAnnouncements([]);
+      navigate('/admin/login', { replace: true });
+    };
+    return () => {
+      onAdminUnauthorized = null;
+    };
+  }, [navigate]);
+
+  useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token || isTokenExpired(token)) return;
     loadOrders(token);
@@ -677,7 +716,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const persistAdmin = useCallback((a: AdminUser | null) => {
     if (a) localStorage.setItem(ADMIN_KEY, JSON.stringify(a));
-    else localStorage.removeItem(ADMIN_KEY);
+    else clearStoredAdminSession();
     setAdminUser(a);
   }, []);
 
@@ -814,12 +853,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const adminLogout = useCallback(() => {
-    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    clearStoredAdminSession();
     setAdminOrders([]);
     setAdminReservations([]);
     setAdminAnnouncements([]);
-    persistAdmin(null);
-  }, [persistAdmin]);
+    setAdminUser(null);
+  }, []);
 
   // ---------- 购物车 ----------
   const addToCart = useCallback(
@@ -956,25 +995,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const checkIn = useCallback(
-    async (reservationId: number) => {
+    async (reservationId: number): Promise<{ ok: boolean; message: string }> => {
       try {
         await apiRequest('/api/checkin', {
           method: 'POST',
           body: JSON.stringify({ revId: reservationId }),
         });
         await loadOrders();
-        setReservations((prev) =>
-          prev.map((r) =>
-            r.id === reservationId.toString()
-              ? { ...r, checkInAt: new Date().toLocaleString('zh-CN') }
-              : r
-          )
-        );
+        await loadReservations();
+        return { ok: true, message: '打卡成功，配送订单已开始制作' };
       } catch (err) {
-        console.error('打卡失败', err);
+        const message = err instanceof Error ? err.message : '打卡失败';
+        await loadReservations();
+        return { ok: false, message };
       }
     },
-    [loadOrders]
+    [loadOrders, loadReservations]
   );
 
   // ---------- 预约与候补 ----------
@@ -1167,6 +1203,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadAdminReservations]
   );
 
+  const adminDeleteReservation = useCallback(
+    async (id: string) => {
+      await adminApiRequest(`/api/admin/reservations/${id}`, { method: 'DELETE' });
+      await loadAdminReservations();
+    },
+    [loadAdminReservations]
+  );
+
+  const adminDeleteOrder = useCallback(
+    async (id: string) => {
+      await adminApiRequest(`/api/admin/orders/${id}`, { method: 'DELETE' });
+      await loadAdminOrders();
+    },
+    [loadAdminOrders]
+  );
+
   const adminClearBreachLimit = useCallback((phone: string) => {
     setBreachRecords((list) => list.filter((b) => b.phone !== phone));
   }, []);
@@ -1254,6 +1306,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       adminSetOrderStatus,
       adminSetDeliveryStatus,
       adminMarkReservation,
+      adminDeleteReservation,
+      adminDeleteOrder,
       adminClearBreachLimit,
       adminCreateAnnouncement,
       adminUpdateAnnouncement,
@@ -1308,6 +1362,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       adminSetOrderStatus,
       adminSetDeliveryStatus,
       adminMarkReservation,
+      adminDeleteReservation,
+      adminDeleteOrder,
       adminClearBreachLimit,
       adminCreateAnnouncement,
       adminUpdateAnnouncement,
