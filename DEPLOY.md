@@ -38,11 +38,13 @@ mysql://root:密码@containers-us-west-xxx.railway.app:端口/railway
 
 | 变量 | 值 |
 |------|-----|
-| `DATABASE_URL` | 从 MySQL 服务引用 `${{MySQL.MYSQL_URL}}` 或手动粘贴 |
-| `JWT_SECRET` | 随机长字符串（生产环境务必修改） |
+| `DATABASE_URL` | 在后端服务 Variables 点 **Add Reference** → 选 MySQL 服务 → `MYSQL_URL`（**不要**填到 MySQL 服务上） |
+| `JWT_SECRET` | 随机长字符串（必填，否则进程启动即退出） |
 | `PUBLIC_DIR` | `public`（Docker 镜像内已包含图片） |
 
-Railway 会自动注入 `PORT`，无需设置 `SERVER_PORT`。
+Railway 会自动注入 `PORT`，无需设置 `SERVER_PORT`。`SERVER_HOST` 默认为 `0.0.0.0`。
+
+**健康检查失败常见原因：** 未在后端服务配置 `DATABASE_URL` / `JWT_SECRET`，或 `DATABASE_URL` 引用了错误的服务变量。
 
 ### 3. 导入数据库
 

@@ -19,7 +19,13 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let cfg = config::Config::from_env();
-    let pool = db::create_pool(&cfg.database_url).await;
+    tracing::info!(
+        "Starting server on {}:{} (PUBLIC_DIR={})",
+        cfg.server_host,
+        cfg.server_port,
+        cfg.public_dir
+    );
+    let pool = db::create_pool(&cfg.database_url);
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -29,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let static_assets = ServeDir::new(&cfg.public_dir);
 
     async fn health() -> Json<serde_json::Value> {
-        Json(serde_json::json!({ "status": "ok" }))
+        Json(serde_json::json!({ "status": "ok", "service": "study_room_backend" }))
     }
 
     let public_user_routes = Router::new()
