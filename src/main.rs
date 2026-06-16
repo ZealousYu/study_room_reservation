@@ -8,7 +8,7 @@ mod models;
 use axum::{
     middleware,
     routing::{delete, get, post},
-    Router,
+    Json, Router,
 };
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tower_http::cors::Any;
@@ -26,9 +26,14 @@ async fn main() -> anyhow::Result<()> {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let static_assets = ServeDir::new("public");
+    let static_assets = ServeDir::new(&cfg.public_dir);
+
+    async fn health() -> Json<serde_json::Value> {
+        Json(serde_json::json!({ "status": "ok" }))
+    }
 
     let public_user_routes = Router::new()
+        .route("/api/health", get(health))
         .route("/api/auth/register", post(handles::user::register))
         .route("/api/auth/login", post(handles::user::login))
         .route("/api/reset-password", post(handles::user::reset_password))

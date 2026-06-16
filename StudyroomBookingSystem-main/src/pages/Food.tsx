@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ProductCategory } from '../context/AppContext';
 import { useApp } from '../context/AppContext';
+import { assetUrl } from '../config/api';
 import { Toast } from '../components/Toast';
 
 const CATS: ProductCategory[] = ['咖啡', '茶饮', '甜品', '小吃'];
@@ -22,8 +23,7 @@ export function Food() {
 
   const getImageUrl = (picture: string | undefined) => {
     if (!picture) return null;
-    if (picture.startsWith('http')) return picture;
-    return `http://localhost:8080${picture}`;
+    return assetUrl(picture);
   };
 
   return (

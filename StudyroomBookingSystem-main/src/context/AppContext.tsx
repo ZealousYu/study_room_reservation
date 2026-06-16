@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { apiUrl } from '../config/api';
 
 export function mapReservationStatus(status: number): ReservationStatus {
   switch (status) {
@@ -309,7 +310,7 @@ async function apiRequest<T>(
   options?: RequestInit
 ): Promise<T> {
   const token = localStorage.getItem(TOKEN_KEY);
-  const res = await fetch(`http://localhost:8080${url}`, {
+  const res = await fetch(apiUrl(url), {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -337,7 +338,7 @@ async function adminApiRequest<T>(url: string, options?: RequestInit): Promise<T
     onAdminUnauthorized?.();
     throw new Error('管理员登录已过期，请重新登录');
   }
-  const res = await fetch(`http://localhost:8080${url}`, {
+  const res = await fetch(apiUrl(url), {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -581,7 +582,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadAnnouncements = useCallback(async () => {
     try {
-      const res = await fetch('http://localhost:8080/api/notices');
+      const res = await fetch(apiUrl('/api/notices'));
       if (!res.ok) return;
       const data = await res.json();
       setAnnouncements(data.map(mapNotice));
@@ -688,7 +689,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // 获取商品列表
   useEffect(() => {
-    fetch('http://localhost:8080/api/products')
+    fetch(apiUrl('/api/products'))
       .then((res) => res.json())
       .then((data) => {
         const mapped: Product[] = data.map((item: any) => ({
@@ -729,7 +730,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { ok: false, message: '请输入密码' };
       }
       try {
-        const res = await fetch('http://localhost:8080/api/auth/login', {
+        const res = await fetch(apiUrl('/api/auth/login'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone, password }),
@@ -765,7 +766,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const res = await fetch('http://localhost:8080/api/auth/register', {
+        const res = await fetch(apiUrl('/api/auth/register'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone, password, realName: `同学${phone.slice(-4)}` }),
@@ -796,7 +797,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const res = await fetch('http://localhost:8080/api/reset-password', {
+        const res = await fetch(apiUrl('/api/reset-password'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -830,7 +831,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const a = account.trim();
       if (!a || !password) return { ok: false, message: '请输入账号和密码' };
       try {
-        const res = await fetch('http://localhost:8080/api/admin/login', {
+        const res = await fetch(apiUrl('/api/admin/login'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone: a, password }),

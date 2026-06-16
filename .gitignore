@@ -2,7 +2,6 @@
 target/
 **/target/
 debug/
-Cargo.lock
 
 # Node
 node_modules/
@@ -13,6 +12,8 @@ dist/
 # Environment & OS
 .env
 .env.*
+!.env.example
+!**/.env.example
 .DS_Store
 
 # Rustfmt

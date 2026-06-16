@@ -1,0 +1,20 @@
+# Build
+target/
+**/*.rs.bk
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Frontend
+StudyroomBookingSystem-main/node_modules
+StudyroomBookingSystem-main/dist
+
+# Legacy / large
+snack-backend/target
+.git
+
+# Docs & sql (not needed in image; SQL imported separately)
+*.docx
+study_room_reservation_backup.sql
