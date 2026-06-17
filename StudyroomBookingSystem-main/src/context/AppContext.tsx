@@ -301,7 +301,8 @@ function readStoredUser(): User | null {
 
 function formatAuthError(message: string): string {
   if (message === '未授权') return '账号或密码错误，请检查后重试';
-  if (message === '数据已存在') return '该手机号已注册，请直接登录';
+  if (message === '该手机号已注册' || message === '数据已存在') return '该手机号已注册，请直接登录';
+  if (message === '操作失败，请稍后重试' || message === '数据库错误') return '注册失败，请稍后再试';
   return message;
 }
 

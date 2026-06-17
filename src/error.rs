@@ -33,7 +33,7 @@ impl IntoResponse for AppError {
         let (status, message) = match self {
             AppError::Database(e) => {
                 tracing::error!("Database error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "数据库错误".to_string())
+                (StatusCode::INTERNAL_SERVER_ERROR, "操作失败，请稍后重试".to_string())
             }
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "未授权".to_string()),
@@ -41,7 +41,7 @@ impl IntoResponse for AppError {
             AppError::NotFound => (StatusCode::NOT_FOUND, "资源不存在".to_string()),
             AppError::InsufficientStock => (StatusCode::BAD_REQUEST, "库存不足".to_string()),
             AppError::InvalidOrderStatus => (StatusCode::BAD_REQUEST, "订单状态不允许".to_string()),
-            AppError::DuplicateEntry => (StatusCode::CONFLICT, "数据已存在".to_string()),
+            AppError::DuplicateEntry => (StatusCode::CONFLICT, "该手机号已注册".to_string()),
             AppError::Internal => (StatusCode::INTERNAL_SERVER_ERROR, "服务器内部错误".to_string()),
         };
         (status, Json(json!({ "error": message }))).into_response()
@@ -58,9 +58,11 @@ pub fn from_sqlx(err: sqlx::Error) -> AppError {
             return AppError::DuplicateEntry;
         }
         if msg.contains("Data too long for column 'password'") {
-            return AppError::BadRequest(
-                "密码字段长度不足，请执行 sql/migrate_users_password_varchar256.sql 升级数据库".into(),
+            tracing::error!(
+                "users.password column too short for bcrypt hash; \
+                 run: mysql ... < sql/migrate_users_password_varchar256.sql"
             );
+            return AppError::BadRequest("注册失败，请稍后再试".into());
         }
     }
     AppError::Database(err)
