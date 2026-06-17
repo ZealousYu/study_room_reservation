@@ -38,8 +38,16 @@ pub async fn register(
         return Err(AppError::DuplicateEntry);
     }
 
-    let account = format!("u{}", &req.phone[3..]);
+    let account = format!("u{}", req.phone);
     let password_hash = hash(&req.password, DEFAULT_COST).map_err(|_| AppError::Internal)?;
+
+    if let Some(_) = sqlx::query_as::<_, (i32,)>("SELECT userId FROM users WHERE account = ?")
+        .bind(&account)
+        .fetch_optional(&pool)
+        .await?
+    {
+        return Err(AppError::DuplicateEntry);
+    }
 
     sqlx::query(
         "INSERT INTO users (account, password, realName, userType, phone, state) VALUES (?, ?, ?, 1, ?, 1)",
@@ -49,7 +57,8 @@ pub async fn register(
     .bind(&real_name)
     .bind(&req.phone)
     .execute(&pool)
-    .await?;
+    .await
+    .map_err(crate::error::from_sqlx)?;
 
     let row = sqlx::query(
         "SELECT userId, phone, realName, userType FROM users WHERE phone = ?",
@@ -140,7 +149,8 @@ pub async fn reset_password(
         .bind(&new_hash)
         .bind(user_id)
         .execute(&pool)
-        .await?;
+        .await
+        .map_err(crate::error::from_sqlx)?;
 
     Ok(Json(json!({ "message": "密码重置成功" })))
 }

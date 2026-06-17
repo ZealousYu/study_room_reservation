@@ -58,6 +58,12 @@ mysql -h <主机> -P <端口> -u root -p <数据库名> < study_room_reservation
 
 导入后可用测试账号：`18843917510` / `111111`，管理员 `gft141` / `141414`。
 
+**若数据库是早期版本**（`users.password` 为 `varchar(20)`），注册新用户时 bcrypt 会被截断导致无法登录，需执行：
+
+```bash
+mysql -h <主机> -P <端口> -u root -p railway < sql/migrate_users_password_varchar256.sql
+```
+
 ### 4. 配置 Web 服务
 
 1. 确保仓库根目录有 `Dockerfile` 和 `railway.json`

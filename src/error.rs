@@ -49,3 +49,19 @@ impl IntoResponse for AppError {
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
+
+/// 将常见 MySQL 错误转为业务错误，避免一律返回「数据库错误」。
+pub fn from_sqlx(err: sqlx::Error) -> AppError {
+    if let sqlx::Error::Database(db) = &err {
+        let msg = db.message();
+        if db.code().as_deref() == Some("23000") || msg.contains("Duplicate entry") {
+            return AppError::DuplicateEntry;
+        }
+        if msg.contains("Data too long for column 'password'") {
+            return AppError::BadRequest(
+                "密码字段长度不足，请执行 sql/migrate_users_password_varchar256.sql 升级数据库".into(),
+            );
+        }
+    }
+    AppError::Database(err)
+}
